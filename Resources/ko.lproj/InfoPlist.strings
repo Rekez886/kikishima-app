@@ -1,0 +1,4 @@
+NSAudioCaptureUsageDescription = "회의 소리로 실시간 자막을 만들기 위해 시스템 오디오가 필요합니다. 오디오는 이 Mac에서만 문자로 바뀌며 업로드되지 않습니다.";
+NSCalendarsFullAccessUsageDescription = "macOS에는 이 권한이 ‘전체 접근’으로 표시됩니다. Kikishima는 자막 준비에 필요한 회의 제목, 시간, 참석자 이름만 읽으며 캘린더를 변경하지 않습니다.";
+NSSpeechRecognitionUsageDescription = "기기 내 음성 인식으로 회의 오디오를 텍스트로 바꿉니다.";
+NSScreenCaptureUsageDescription = "말풍선 모드를 켰을 때만 발언자 위치를 찾기 위해 회의 창을 읽습니다. 화면은 저장되거나 업로드되지 않습니다.";

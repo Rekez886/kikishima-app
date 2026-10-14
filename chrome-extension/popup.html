@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  :root { color-scheme: dark; }
+  body { width: 300px; margin: 0; padding: 14px 16px 16px; background: #1c1c1c; color: #fff;
+         font: 14px/1.5 -apple-system, "PingFang SC", "Hiragino Sans", sans-serif; }
+  h1 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; justify-content: space-between; }
+  .sw { width: 40px; height: 23px; border-radius: 12px; background: #555; position: relative; cursor: pointer; transition: background .15s; }
+  .sw.on { background: #e8b45a; }
+  .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: left .15s; }
+  .sw.on::after { left: 20px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 0; }
+  .muted { color: #999; font-size: 12px; }
+  .warn { color: #f0b35a; font-size: 12px; margin-top: 6px; }
+  input { flex: 1; background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 7px; color: #fff; padding: 7px 9px; font: inherit; }
+  button { background: #e8b45a; color: #1c1c1c; border: 0; border-radius: 7px; padding: 7px 12px; font: 600 13px inherit; cursor: pointer; }
+  button.ghost { background: transparent; color: #bbb; border: 1px solid #3a3a3a; }
+  button:disabled { opacity: .5; cursor: default; }
+  hr { border: 0; border-top: 1px solid #2e2e2e; margin: 12px 0; }
+  a { color: #e8b45a; }
+</style></head>
+<body>
+  <h1><span>Kikishima</span><span class="sw" id="toggle"></span></h1>
+  <div id="account"></div>
+  <hr>
+  <div class="row"><span class="muted" id="hint"></span></div>
+  <script src="reliability.js"></script>
+  <script src="popup.js"></script>
+</body></html>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Hardened Runtime 下访问音频输入（Core Audio 进程 tap 走这条权限；系统再按 NSAudioCaptureUsageDescription 弹 TCC） -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- Hardened Runtime 下读取日历所需；用户仍需在系统弹窗中明确授权 -->
+	<key>com.apple.security.personal-information.calendars</key>
+	<true/>
+	<!-- 非沙盒：直销版不进 App Store，屏幕捕获 / 语音识别只靠 TCC 描述文案 -->
+</dict>
+</plist>

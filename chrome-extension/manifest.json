@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Kikishima",
+  "version": "1.1.5",
+  "description": "Bilingual, pre-translated subtitles for online videos, powered by the Kikishima app on your Mac.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs/vi2O25Vx5HSpnPHACAeSevPpYUIuExW5+DYo7+McWkHS5Nna1G5FEi0qt55lXAAoe7JiVVB+bJ1q5rikmlKybcfykKkConxdxrMpfuDAntNBL6sBl/6pVBzp6pmXMscUu0flnaGRMFcK4CHGCPH5elcfYjj5GrNKqDW16zSdWhq8nbq2QEdnAMCyJndF92N/mGrPEkCuOUS1b96wi9XxO2+6t95DDpAMLLEUyQFsfvJxlcLPyzuzi2u7bktbxWm2QsCZr+HdnlUk90vAgVbKsLq6gH56sSegOqHeEtqDuDkci9+H98HSQ6V6SgV5jnyHP6Y3McIeCVYzvnT6HlEQIDAQAB",
+  "permissions": [
+    "storage",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://api.kikishima.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "sites/youtube-main.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "reliability.js",
+        "sites/youtube.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {},
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Kikishima"
+  }
+}

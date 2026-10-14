@@ -1,0 +1,4 @@
+NSAudioCaptureUsageDescription = "需要擷取系統音訊，才能為會議聲音產生即時字幕。音訊僅在本機轉寫，不會上傳。";
+NSCalendarsFullAccessUsageDescription = "macOS 將此權限顯示為「完全存取」。Kikishima 只會讀取會議標題、時間和與會者姓名來準備字幕，不會修改你的行事曆。";
+NSSpeechRecognitionUsageDescription = "使用系統本機語音辨識把會議音訊轉成文字。";
+NSScreenCaptureUsageDescription = "僅在開啟「氣泡模式」時需要讀取會議視窗畫面，用來定位正在發言的人。畫面不會儲存或上傳。";

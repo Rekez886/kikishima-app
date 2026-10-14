@@ -1,0 +1,4 @@
+NSAudioCaptureUsageDescription = "Kikishima needs system audio to caption your meetings live. Audio is transcribed on this Mac and never uploaded.";
+NSCalendarsFullAccessUsageDescription = "macOS calls this Full Access. Kikishima only reads meeting titles, times, and attendee names to prepare captions, and never changes your calendar.";
+NSSpeechRecognitionUsageDescription = "Uses on-device speech recognition to turn meeting audio into text.";
+NSScreenCaptureUsageDescription = "Only used by Bubble mode to locate who is speaking in the meeting window. Frames are never saved or uploaded.";
