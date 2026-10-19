@@ -61,6 +61,12 @@ public final class DynamicNotch<Expanded, CompactLeading, CompactTrailing>: Obse
 
     /// Called for every new panel, before layout and before it becomes visible.
     /// Hosts can set sharing, mouse handling, level and geometry atomically.
+    /// Host-selected fallback if the previous target display disconnects.
+    public var fallbackScreen: (() -> NSScreen?)?
+    private var targetScreenID: Int?
+    private func screenID(_ screen: NSScreen) -> Int? {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.intValue
+    }
     public var configureWindow: ((NSPanel, NSScreen) -> Void)?
 
     /// The window appearance, indicating the style of the notch.
@@ -149,8 +155,12 @@ public final class DynamicNotch<Expanded, CompactLeading, CompactTrailing>: Obse
         Task {
             let sequence = NotificationCenter.default.notifications(named: NSApplication.didChangeScreenParametersNotification)
             for await _ in sequence.map(\.name) {
-                if let screen = NSScreen.screens.first {
-                    initializeWindow(screen: screen)
+                let screens = NSScreen.screens
+                let fallback = fallbackScreen?() ?? NSScreen.main
+                let target = ScreenRetentionPolicy.targetID(currentID: targetScreenID,
+                    availableIDs: screens.compactMap { screenID($0) }, fallbackID: fallback.flatMap { screenID($0) })
+                if let screen = screens.first(where: { screenID($0) == target }) {
+                    initializeWindow(screen: screen, orderFront: state != .hidden)
                 }
             }
         }
@@ -179,7 +189,7 @@ extension DynamicNotch {
     }
 
     func _expand(on screen: NSScreen = NSScreen.screens[0], skipHide: Bool) async {
-        guard state != .expanded else { return }
+        guard state != .expanded || targetScreenID != screenID(screen) else { return }
 
         closePanelTask?.cancel()
 
@@ -352,6 +362,7 @@ private extension DynamicNotch {
     /// - Parameter screen: the screen to initialize the window on.
     /// - Parameter orderFront: whether to order the window front immediately (default: true)
     func initializeWindow(screen: NSScreen, orderFront: Bool = true) {
+        targetScreenID = screenID(screen)
         // so that we don't have a duplicate window
         deinitializeWindow()
 

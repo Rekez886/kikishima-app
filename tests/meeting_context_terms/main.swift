@@ -2,7 +2,7 @@ import Foundation
 
 private let context = MeetingContext(
     title: "DeviantArt Japan / UX Review",
-    attendeeNames: ["Mika", "Mika", "Jay", "  "],
+    attendeeNames: ["Mika", "Mika", "Ken", "  "],
     startDate: .distantPast,
     endDate: .distantFuture,
     sources: [.macOS],
@@ -25,7 +25,7 @@ private func testTemporaryTermsDoNotChangePermanentGlossary() {
 
     precondition(
         merged.split(separator: "\n").map(String.init)
-            == ["Kikishima", "API → API", "DeviantArt Japan / UX Review", "Mika", "Jay"]
+            == ["Kikishima", "API → API", "DeviantArt Japan / UX Review", "Mika", "Ken"]
     )
     precondition(defaults.string(forKey: "glossary") == "Kikishima\nAPI → API")
 }

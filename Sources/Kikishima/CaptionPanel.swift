@@ -5,22 +5,28 @@ import QuartzCore
 import Translation
 import Pow
 
+/// Can accept explicit keyboard interaction without becoming the main app window.
+private final class CaptionKeyboardPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
 @MainActor
 final class CaptionPanelController: NSObject, NSWindowDelegate {
     static let shared = CaptionPanelController()
     private var panel: NSPanel?
 
-    /// 会议岛走 DynamicNotchKit 引擎（islandEngine != "panel"）；其余形态仍是自己的 NSPanel
+    /// 会议刘海走 DynamicNotchKit；关闭该引擎时仍用同款岛内容。
     private var notchEngine: Bool { usesIsland && IslandNotchController.enabled }
-    var isVisible: Bool { panel?.isVisible == true || (notchEngine && IslandNotchController.shared.visible) }
+    var isVisible: Bool { panel?.isVisible == true || IslandNotchController.shared.visible }
 
     func show() {
         if notchEngine { IslandNotchController.shared.show(); return }
         if panel == nil { build() }
         applySharing()
         applyAppearance()
-        if usesIsland, !userAdjusted {
-            revealed = CaptionState.shared.hasIslandContent
+        if usesIsland {
+            revealed = CaptionState.shared.wantsIslandExpanded
             CaptionState.shared.islandExpanded = revealed
             placing = true
             panel?.setFrame(islandFrame(expanded: revealed), display: false)
@@ -31,17 +37,18 @@ final class CaptionPanelController: NSObject, NSWindowDelegate {
 
     private var builtIsland = false
     private var revealed = false
-    private var usesIsland: Bool { CaptionState.shared.effectiveMode == .meeting && CaptionState.shared.captionSurface == "island" }
+    private var usesIsland: Bool { CaptionState.shared.usesIslandCaptions }
 
     /// 菜单里切「灵动岛 / 桌面窗口」：收掉当前形态，运行中就立刻以新形态摆出来
-    func switchSurface() {
+    func switchSurface(showIfRunning: Bool = true, force: Bool = true) {
         let wasVisible = isVisible
         IslandNotchController.shared.hide()
+        panel?.delegate = nil
         panel?.orderOut(nil)
         panel = nil
-        guard wasVisible || CaptionState.shared.running else { return }
+        guard wasVisible || (showIfRunning && CaptionState.shared.running) else { return }
         show()
-        place(for: CaptionState.shared.effectiveMode, force: true)
+        place(for: CaptionState.shared.effectiveMode, force: force)
     }
 
     /// 外观：会议 = 摄像头下的无边框岛；其它 = 紧凑无边框或带标题栏。形态切换需要重建面板（styleMask 热切不可靠）
@@ -65,13 +72,16 @@ final class CaptionPanelController: NSObject, NSWindowDelegate {
             return
         }
         p.ignoresMouseEvents = !island && s.compactCaptions && s.captionClickThrough
-        p.backgroundColor = wantBorderless ? .clear : NSColor(calibratedWhite: 0.06, alpha: s.captionOpacity)
+        p.title = tr("字幕")
+        p.appearance = nil
+        p.isOpaque = false
+        p.backgroundColor = wantBorderless ? .clear : NSColor(KKColor.notchBackground).withAlphaComponent(s.captionOpacity)
     }
 
     func hide() {
-        if notchEngine { IslandNotchController.shared.hide() }
+        IslandNotchController.shared.hide()
         guard let p = panel, p.isVisible else { return }
-        if usesIsland, revealed, !userAdjusted {
+        if usesIsland, revealed {
             revealed = false
             CaptionState.shared.islandExpanded = false
             placing = true
@@ -91,8 +101,8 @@ final class CaptionPanelController: NSObject, NSWindowDelegate {
 
     func syncIslandReveal() {
         if notchEngine { IslandNotchController.shared.sync(); return }
-        guard usesIsland, panel?.isVisible == true, !userAdjusted else { return }
-        let shouldReveal = CaptionState.shared.hasIslandContent
+        guard usesIsland, panel?.isVisible == true else { return }
+        let shouldReveal = CaptionState.shared.wantsIslandExpanded
         guard shouldReveal != revealed else { return }
         revealed = shouldReveal
         CaptionState.shared.islandExpanded = shouldReveal
@@ -145,23 +155,23 @@ final class CaptionPanelController: NSObject, NSWindowDelegate {
         userAdjusted = true
     }
 
-    /// 按场景摆位：会议 → 摄像头下方的岛，翻译到了再向下展开；视频 → 贴发声窗口底部
+    /// 会议刘海位置保持置顶岛；视频及桌面窗口按发声窗口摆位。
     func place(for mode: EffectiveMode, force: Bool = false) {
-        if mode == .meeting, usesIsland, IslandNotchController.enabled {
-            if IslandNotchController.shared.visible { IslandNotchController.shared.resizeToContent() }
+        if usesIsland, IslandNotchController.enabled {
+            if IslandNotchController.shared.visible { IslandNotchController.shared.sync(force: force) }
             return
         }
         if panel == nil { build() }
         guard let p = panel else { return }
-        if userAdjusted && !force { return }
-        if mode == .meeting, usesIsland {
-            revealed = CaptionState.shared.hasIslandContent
+        if usesIsland {
+            revealed = CaptionState.shared.wantsIslandExpanded
             CaptionState.shared.islandExpanded = revealed
             placing = true
             p.setFrame(islandFrame(expanded: revealed), display: true, animate: p.isVisible && revealed)
             placing = false
             return
         }
+        if userAdjusted && !force { return }
         let source = AudioSourceWindow.current()
         let screen = source.flatMap { s in NSScreen.screens.first { $0.frame.contains(NSPoint(x: s.midX, y: s.midY)) } }
             ?? NSScreen.main ?? NSScreen.screens.first
@@ -183,70 +193,81 @@ final class CaptionPanelController: NSObject, NSWindowDelegate {
         placing = false
     }
 
-    private func islandScreen() -> NSScreen? {
-        let source = AudioSourceWindow.frontWindowFrame(for: CaptionState.micUsers())
-        return source.flatMap { s in NSScreen.screens.first { $0.frame.contains(NSPoint(x: s.midX, y: s.midY)) } }
-            ?? NSScreen.main ?? NSScreen.screens.first
-    }
+    private let islandDisplay = IslandDisplayContext()
+    private func islandScreen() -> NSScreen? { CaptionIslandScreen.selected() }
 
     private func islandFrame(expanded: Bool) -> NSRect {
-        let screen = islandScreen() ?? NSScreen.main ?? NSScreen.screens.first
+        let screen = islandScreen()
         guard let screen else { return .zero }
-        let vf = screen.visibleFrame
-        let left = screen.auxiliaryTopLeftArea ?? .zero
-        let right = screen.auxiliaryTopRightArea ?? .zero
-        let notch = CaptionIslandLayout.notchWidth(auxiliaryTopLeft: left, auxiliaryTopRight: right)
-        let cx = CaptionIslandLayout.centerX(visibleFrame: vf, auxiliaryTopLeft: left, auxiliaryTopRight: right)
-        let s = CaptionState.shared
-        let rect = expanded
-            ? CaptionIslandLayout.expandedRect(visibleFrame: vf, centerX: cx, widthFraction: s.captionWidthFraction, compact: s.compactCaptions)
-            : CaptionIslandLayout.idleRect(visibleFrame: vf, centerX: cx, notchWidth: notch)
-        return NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)
+        islandDisplay.visibleFrame = screen.frame
+        islandDisplay.notchWidth = screen.auxiliaryTopLeftArea.flatMap { left in screen.auxiliaryTopRightArea.map { right in CaptionIslandLayout.notchWidth(auxiliaryTopLeft: left, auxiliaryTopRight: right) } } ?? 0
+        let content = expanded ? IslandExpandedView.expandedSize(in: screen.frame) : IslandExpandedView.idleSize(notchWidth: islandDisplay.notchWidth)
+        let size = CGSize(width: content.width + 30, height: content.height + 23)
+        if !CaptionIslandScreen.hasNotch(screen) {
+            return CaptionScreenPolicy.floatingFrame(screenFrame: screen.frame, size: size)
+        }
+        return CGRect(x: screen.frame.midX - size.width / 2,
+                      y: screen.visibleFrame.maxY - size.height, width: size.width, height: size.height)
     }
 
     /// 视频模式轮询：发声窗口挪了 / 换了就跟过去（用户手动拖过则不跟）
     func followSourceIfMoved() {
-        guard !userAdjusted, panel?.isVisible == true, let src = AudioSourceWindow.current() else { return }
+        guard !usesIsland, !userAdjusted, panel?.isVisible == true, let src = AudioSourceWindow.current() else { return }
         if let last = lastSourceFrame, abs(last.midX - src.midX) < 20, abs(last.minY - src.minY) < 20, abs(last.width - src.width) < 20 { return }
         place(for: .video, force: true)
+    }
+
+    /// Content density changes resize the island without changing its top edge.
+    func resizeIslandToContent() {
+        guard usesIsland else { return }
+        if notchEngine { IslandNotchController.shared.resizeToContent(); return }
+        guard let panel, panel.isVisible else { return }
+        placing = true
+        panel.setFrame(islandFrame(expanded: revealed), display: true)
+        placing = false
     }
 
     /// 用户明确重置位置（菜单「重置字幕位置」）
     func resetPlacement(mode: EffectiveMode) { userAdjusted = false; place(for: mode, force: true) }
 
-    func windowDidMove(_ notification: Notification) { if !placing { userAdjusted = true } }
-    func windowDidResize(_ notification: Notification) { if !placing { userAdjusted = true } }
+    func windowDidMove(_ notification: Notification) { if !placing && !usesIsland { userAdjusted = true } }
+    func windowDidResize(_ notification: Notification) { if !placing && !usesIsland { userAdjusted = true } }
 
     private func build() {
         let s = CaptionState.shared
         let island = usesIsland
         let compact = island || s.compactCaptions
         builtIsland = island
-        let p = NSPanel(
+        let p = CaptionKeyboardPanel(
             contentRect: NSRect(x: 120, y: 80, width: island ? CaptionIslandLayout.idleMinWidth : 780, height: compact ? CaptionIslandLayout.idleHeight : 320),
             styleMask: compact ? [.borderless, .resizable, .nonactivatingPanel] : [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered, defer: false)
         p.title = tr("字幕")                                   // 不叫 Kikishima：主窗口按 identifier 找，避免撞名
         p.identifier = NSUserInterfaceItemIdentifier("caption-panel")
-        p.setFrameAutosaveName(island ? "caption-island" : compact ? "caption-panel-compact" : "caption-panel")
-        p.level = .floating
+        if !island { p.setFrameAutosaveName(compact ? "caption-panel-compact" : "caption-panel") }
+        p.level = island ? .statusBar : .floating
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         p.sharingType = s.captionsVisibleInScreenShare ? .readOnly : .none   // 屏幕共享 / 录屏里默认不出现（设置里可改）
         p.isReleasedWhenClosed = false
+        p.isOpaque = false
         p.hidesOnDeactivate = false
         if compact {
             p.isOpaque = false
             p.backgroundColor = .clear
             p.hasShadow = true
-            p.isMovableByWindowBackground = true          // 无标题栏：按住任意处拖
-            p.minSize = NSSize(width: 360, height: 90)
+            p.isMovableByWindowBackground = !island          // 无标题栏：按住任意处拖
+            p.minSize = island ? NSSize(width: 1, height: 1) : NSSize(width: 360, height: 90)
             p.ignoresMouseEvents = !island && s.captionClickThrough
         } else {
             p.titlebarAppearsTransparent = true
-            p.backgroundColor = NSColor(calibratedWhite: 0.06, alpha: s.captionOpacity)
+            p.backgroundColor = NSColor(KKColor.notchBackground).withAlphaComponent(s.captionOpacity)
         }
         p.delegate = self
-        p.contentView = NSHostingView(rootView: CaptionFeedView(state: s))
+        if island {
+            p.contentView = NSHostingView(rootView: IslandPanelView(state: s, display: islandDisplay))
+        } else {
+            p.contentView = NSHostingView(rootView: CaptionFeedView(state: s))
+        }
         panel = p
     }
 
@@ -257,35 +278,54 @@ final class CaptionPanelController: NSObject, NSWindowDelegate {
     }
 }
 
+/// Same compact/expanded content as NotchKit, including live appearance changes.
+private struct IslandPanelView: View {
+    @Bindable var state: CaptionState
+    @Bindable var display: IslandDisplayContext
+    var body: some View {
+        IslandExpandedView(state: state, display: display)
+            .padding(.horizontal, 15).padding(.top, 8).padding(.bottom, 15)
+            .background(RoundedRectangle(cornerRadius: state.wantsIslandExpanded ? 20 : 999).fill(KKColor.notchBackground))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
 struct CaptionFeedView: View {
     @Bindable var state: CaptionState
     /// 由 DynamicNotchKit 承载：黑底和胶囊态由它画，这里只出内容
     var hostedInNotch = false
+    var hostSideInset: CGFloat = 15
     @State private var hovering = false
     @State private var showSettings = false
-    private var isIsland: Bool { state.effectiveMode == .meeting && state.captionSurface == "island" }
+    private enum ToolbarAction: Hashable { case pause, stop, compact, settings }
+    @FocusState private var toolbarFocus: ToolbarAction?
+    private var isIsland: Bool { state.usesIslandCaptions }
 
     /// 悬停出现的小工具条：暂停 / 停止 / 切形态（点击穿透开着时鼠标到不了这里，靠菜单栏）
     private var toolbar: some View {
         HStack(spacing: 6) {
             if state.running {
                 Button { state.paused ? state.resume() : state.pause() } label: { Image(systemName: state.paused ? "play.fill" : "pause.fill") }
-                    .help(state.paused ? tr("继续字幕") : tr("暂停字幕"))
+                    .help(state.paused ? tr("继续字幕") : tr("暂停字幕")).accessibilityLabel(state.paused ? tr("继续字幕") : tr("暂停字幕"))
+                    .focused($toolbarFocus, equals: .pause)
                     .disabled(state.resuming || state.switchingMeetingLanguage)
                 Button { state.stop(); CaptionPanelController.shared.hide() } label: { Image(systemName: "stop.fill") }
-                    .help(tr("停止字幕"))
+                    .help(tr("停止字幕")).accessibilityLabel(tr("停止字幕"))
+                    .focused($toolbarFocus, equals: .stop)
             }
             Button { state.compactCaptions.toggle() } label: { Image(systemName: state.compactCaptions ? "rectangle.expand.vertical" : "rectangle.compress.vertical") }
-                .help(tr("紧凑字幕"))
-            Button { showSettings.toggle() } label: { Image(systemName: "slider.horizontal.3") }
-                .help(tr("字幕设置"))
+                .help(tr("紧凑字幕")).accessibilityLabel(tr("紧凑字幕"))
+                .focused($toolbarFocus, equals: .compact)
+            Button { showSettings.toggle() } label: { Image(systemName: "gearshape") }
+                .help(tr("字幕设置")).accessibilityLabel(tr("字幕设置"))
+                .focused($toolbarFocus, equals: .settings)
                 .popover(isPresented: $showSettings, arrowEdge: .bottom) { IslandSettingsCard(state: state) }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(KKPlainButtonStyle())
         .font(.system(size: 12))
-        .foregroundStyle(.white.opacity(0.85))
+        .foregroundStyle(KKColor.textSecondary)
         .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(Capsule().fill(Color.black.opacity(0.55)))
+        .background(Capsule().fill(KKColor.notchBackground.opacity(0.55)))
         .padding(8)
     }
 
@@ -308,12 +348,19 @@ struct CaptionFeedView: View {
             showSettings = false
             state.islandSettingsOpen = false
         }
-        .overlay(alignment: hostedInNotch ? .bottomTrailing : .topTrailing) { if hovering || showSettings, state.islandExpanded || !isIsland || hostedInNotch { toolbar } }
+        .overlay(alignment: .topTrailing) {
+            if state.islandExpanded || !isIsland || hostedInNotch {
+                // Keep controls in the keyboard tree even before the mouse hovers.
+                toolbar
+                    .opacity(hovering || showSettings || toolbarFocus != nil ? 1 : 0)
+                    .allowsHitTesting(hovering || showSettings || toolbarFocus != nil)
+            }
+        }
         .onHover { hovering = $0 }
         .background {
             if !hostedInNotch, isIsland || state.compactCaptions {
                 RoundedRectangle(cornerRadius: isIsland && !state.islandExpanded ? 18 : 22, style: .continuous)
-                    .fill(Color.black.opacity(state.captionOpacity))
+                    .fill(KKColor.notchBackground.opacity(state.captionOpacity))
             }
         }
         .onChange(of: state.chunks.count) { CaptionPanelController.shared.syncIslandReveal() }
@@ -327,22 +374,22 @@ struct CaptionFeedView: View {
     private var islandIdle: some View {
         HStack(spacing: 8) {
             Capsule()
-                .fill(Color.white.opacity(state.running ? 0.92 : 0.45))
+                .fill((state.silentTooLong ? KKColor.warning : KKColor.historyInk).opacity(state.running ? 0.92 : 0.45))
                 .frame(width: 22, height: 8)
             if state.running {
                 Capsule()
-                    .fill(Color.white.opacity(0.35 + state.audioLevel * 0.55))
+                    .fill(KKColor.historyInk.opacity(0.35 + state.audioLevel * 0.55))
                     .frame(width: 3, height: 6 + state.audioLevel * 10)
                 Capsule()
-                    .fill(Color.white.opacity(0.28 + state.audioLevel * 0.5))
+                    .fill(KKColor.historyInk.opacity(0.28 + state.audioLevel * 0.5))
                     .frame(width: 3, height: 4 + state.audioLevel * 14)
                 Capsule()
-                    .fill(Color.white.opacity(0.35 + state.audioLevel * 0.55))
+                    .fill(KKColor.historyInk.opacity(0.35 + state.audioLevel * 0.55))
                     .frame(width: 3, height: 6 + state.audioLevel * 10)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityLabel(state.running ? tr("正在听…") : tr("字幕"))
+        .accessibilityLabel(state.running ? CaptionListeningStatus.text(silentTooLong: state.silentTooLong, audioStalled: state.audioStalled) : tr("字幕"))
     }
 
     private var content: some View {
@@ -350,152 +397,59 @@ struct CaptionFeedView: View {
             if let banner = state.errorBanner {
                 HStack(spacing: 10) {
                     Image(systemName: banner.severity == .error ? "exclamationmark.triangle.fill" : "info.circle.fill")
-                        .foregroundStyle(banner.severity == .error ? .orange : .blue)
-                    Text(banner.text).font(.system(size: 13)).foregroundStyle(.white)
+                        .foregroundStyle(banner.severity == .error ? KKColor.warning : KKColor.textSecondary)
+                    Text(banner.text).font(.system(size: 13)).foregroundStyle(KKColor.textPrimary)
                     Spacer()
                     if let action = banner.action {
-                        Button(tr(action.title)) { state.performBanner(action) }
-                            .controlSize(.small)
+                        if action == .upgrade {
+                            if state.plan != "pro" && state.plan != "dev" {
+                                Button(tr("升级 Pro")) { state.openUpgrade() }
+                                    .kkPrimaryButton()
+                                    .controlSize(.small)
+                            }
+                        } else {
+                            Button(tr(action.title)) { state.performBanner(action) }
+                                .buttonStyle(KKQuietButtonStyle())
+                                .controlSize(.small)
+                        }
                     }
                     Button { state.errorBanner = nil } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.plain).foregroundStyle(.gray)
+                        .buttonStyle(KKPlainButtonStyle()).foregroundStyle(KKColor.textTertiary)
                         .accessibilityLabel(tr("关闭"))
                 }
                 .padding(.horizontal, 14).padding(.vertical, 8)
-                .background(Color(white: 0.16))
+                .background(KKColor.surfaceRaised)
                 .transition(.movingParts.blur.combined(with: .move(edge: .top)))
             }
             if state.paused {
                 HStack(spacing: 10) {
-                    Image(systemName: "pause.circle.fill").foregroundStyle(.yellow)
-                    Text(tr("已暂停 · 声音不再记录")).font(.system(size: 13)).foregroundStyle(.white)
+                    Image(systemName: "pause.circle.fill").foregroundStyle(KKColor.textSecondary)
+                    Text(tr("已暂停 · 声音不再记录")).font(.system(size: 13)).foregroundStyle(KKColor.textPrimary)
                     Spacer()
-                    Button(tr("继续")) { state.resume() }.controlSize(.small)
+                    Button(tr("继续")) { state.resume() }
+                        .accessibilityLabel(tr("继续字幕"))
+                        .buttonStyle(KKQuietButtonStyle()).controlSize(.small)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 8)
-                .background(Color(white: 0.16))
+                .background(KKColor.surfaceRaised)
                 .transition(.movingParts.blur.combined(with: .move(edge: .top)))
             }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    if state.chunks.isEmpty && state.pendingEn.isEmpty {
-                        // 空态 / 加载态：启动中、下载模型、正在听。以前是一块纯黑
-                        VStack(spacing: 8) {
-                            Image(systemName: state.starting ? "hourglass" : "waveform")
-                                .font(.title2).foregroundStyle(Color(white: 0.5))
-                            Text(state.running ? tr("正在听…") : state.status)
-                                .font(state.captionFont(14)).foregroundStyle(Color(white: 0.62))
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 36).padding(.horizontal, 24)
-                    } else if state.compactCaptions {
-                        // 紧凑模式：只看最近两句，大字（会议里盯着看的形态）。没译文的块回落显示原文，额度用完 / 登出时不再整块空白
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(state.compactCaptionChunks) { chunk in
-                                let isLast = chunk.id == state.visibleCaptionChunks.last?.id
-                                Group {
-                                if chunk.isMarker {
-                                    Text(chunk.displaySource).font(state.captionFont(12)).foregroundStyle(Color(white: 0.5))
-                                } else {
-                                    // 双语：小原文 + 大译文；仅译文：没译文时回落原文；仅原文：只原文
-                                    if state.showSource && (state.showTranslation ? !chunk.zh.isEmpty : true) {
-                                        Text(chunk.displaySource)
-                                            .font(state.captionFont(state.showTranslation ? max(12, state.zhFontSize * 0.55) : state.zhFontSize * 1.05))
-                                            .foregroundStyle(Color(white: isLast ? 0.78 : 0.55))
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    if state.showTranslation {
-                                        // 仅译文时不回落原文；等待 GPT 译文期间显示「…」
-                                        Text(chunk.zh.isEmpty ? (state.translationPaused && !state.showSource ? chunk.en : "…") : chunk.displayTranslation)
-                                            .font(state.captionFont(state.zhFontSize * 1.15, weight: .medium))
-                                            .foregroundStyle(chunk.zh.isEmpty ? Color(white: 0.45) : chunk.isDraft ? Color(white: 0.72) : isLast ? .white : Color(white: 0.7))
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                }
-                                }
-                                .transition(.movingParts.move(edge: .bottom).combined(with: .opacity))
-                            }
-                            // 正在说的这句（未定稿 / 未切块）：原文斜体小字 + 本机翻译的灰色草稿，看起来接近同步
-                            if state.showSource, !state.pendingEn.isEmpty {
-                                Text(state.pendingEn)
-                                    .font(state.captionFont(max(12, state.zhFontSize * 0.55))).italic()
-                                    .foregroundStyle(Color(white: 0.5))
-                                    .lineLimit(2)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            if state.showTranslation, !state.pendingDraft.isEmpty {
-                                Text(state.pendingDraft)
-                                    .font(state.captionFont(state.zhFontSize * 1.15, weight: .medium)).italic()
-                                    .foregroundStyle(Color(white: 0.62))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            Color.clear.frame(height: 2).id("bottom")
-                        }
-                        .padding(16)
-                        .animation(.spring(response: 0.4, dampingFraction: 0.88), value: state.visibleCaptionChunks.last?.id)
-                    } else {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        // 只渲染最近 120 块：两小时会议上千块全量 ForEach 会拖慢主线程；完整记录在文件里
-                        ForEach(state.visibleCaptionChunks) { chunk in
-                            if chunk.isMarker {
-                                HStack { Rectangle().fill(Color(white: 0.3)).frame(height: 1); Text(chunk.displaySource).font(state.captionFont(12)).foregroundStyle(Color(white: 0.55)); Rectangle().fill(Color(white: 0.3)).frame(height: 1) }
-                                    .padding(.vertical, 4)
-                            } else {
-                            VStack(alignment: .leading, spacing: 2) {
-                                if state.showSource {
-                                    Text(chunk.displaySource)
-                                        .font(state.captionFont(state.showTranslation ? max(12, state.zhFontSize * 0.55) : state.zhFontSize))
-                                        .foregroundStyle(state.showTranslation ? Color(white: 0.68) : .white)
-                                }
-                                if state.showTranslation {
-                                    Text(chunk.zh.isEmpty ? (state.translationPaused ? (state.showSource ? "" : chunk.en) : "…") : chunk.displayTranslation)
-                                        .font(state.captionFont(state.zhFontSize, weight: .medium))
-                                        .foregroundStyle(chunk.zh.isEmpty ? Color(white: 0.4)
-                                                         : chunk.isDraft ? Color(white: 0.72) : .white)
-                                }
-                            }
-                            .textSelection(.enabled)
-                            .contextMenu {
-                                Button(tr("复制译文")) { copy(chunk.zh) }
-                                Button(tr("复制原文")) { copy(chunk.en) }
-                                Divider()
-                                Button(tr("复制全部译文")) { copyAll() }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        if state.showTranslation, !state.pendingDraft.isEmpty {
-                            Text(state.pendingDraft)
-                                .font(state.captionFont(state.zhFontSize, weight: .medium)).italic()
-                                .foregroundStyle(Color(white: 0.62))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        if state.showSource, !state.pendingEn.isEmpty {
-                            Text(state.pendingEn)
-                                .font(state.captionFont(state.showTranslation ? max(12, state.zhFontSize * 0.55) : state.zhFontSize))
-                                .italic()
-                                .foregroundStyle(Color(white: 0.5))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        Color.clear.frame(height: 8).id("bottom")
-                    }
-                    .padding(16)
-                    }
-                }
-                .onChange(of: state.chunks.last?.zh) { proxy.scrollTo("bottom") }
-                .onChange(of: state.pendingEn) { proxy.scrollTo("bottom") }
-            }
+            captionRows
+
         }
-        .background(Color.clear)
+        .background(isIsland || hostedInNotch ? KKColor.notchBackground : Color.clear)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: state.errorBanner?.text)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: state.paused)
         .contextMenu { Button(tr("复制全部译文")) { copyAll() } }   // 紧凑模式与空白处也能右键
         .accessibilityElement(children: .contain)
         .accessibilityLabel(tr("Kikishima 字幕"))
         .accessibilityAddTraits(.updatesFrequently)
+        .onChange(of: state.uiLanguage) { CaptionPanelController.shared.applyAppearance() }
         // Apple 本地机翻草稿：session 只在此闭包内有效，从流里收块、翻完回填
         .translationTask(state.translationConfig) { session in
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { return }
+#endif
             // Apple 本地翻译：首次会弹系统下载语言包的框（只一次）；失败就没有草稿，不影响正式译文
             try? await session.prepareTranslation()
             for await (id, text) in state.draftRequests {
@@ -503,6 +457,92 @@ struct CaptionFeedView: View {
                     await MainActor.run { state.applyDraft(id, for: text, r.targetText) }
                 }
             }
+        }
+    }
+
+    private var hasPending: Bool { !state.pendingEn.isEmpty || !state.pendingDraft.isEmpty }
+    private var displayedChunks: [CaptionChunk] {
+        let chunks = state.visibleCaptionChunks.filter { !$0.isMarker }
+        let limit = isIsland ? CaptionHierarchy.historyLimit(userSize: state.zhFontSize,
+            showTranslation: state.showTranslation, showSource: state.showSource,
+            banner: state.errorBanner != nil || state.paused) : CaptionHierarchy.maximumHistory
+        return Array(chunks.suffix(hasPending ? limit : limit + 1))
+    }
+
+    private var captionRows: some View {
+        VStack(alignment: .leading, spacing: KKSpace.one) {
+            if displayedChunks.isEmpty && !hasPending {
+                Text(state.running ? CaptionListeningStatus.text(silentTooLong: state.silentTooLong, audioStalled: state.audioStalled) : state.status)
+                    .font(state.captionFont(14)).foregroundStyle(state.silentTooLong ? KKColor.warning : KKColor.textSecondary)
+            }
+            ForEach(Array(displayedChunks.enumerated()), id: \.element.id) { index, chunk in
+                let current = !hasPending && index == displayedChunks.count - 1
+                let age = displayedChunks.count - index - (hasPending ? 0 : 1)
+                captionRow(chunk, current: current, age: age)
+            }
+            if hasPending {
+                VStack(alignment: .leading, spacing: KKSpace.one) {
+                    if state.showTranslation, !state.pendingDraft.isEmpty {
+                        Text(state.pendingDraft)
+                            .kkCaptionLineHeight(fontSize: 17 * scale, lineHeight: 24 * scale)
+                            .font(state.captionFont(CaptionHierarchy.fontSize(current: true, userSize: state.zhFontSize), weight: .medium))
+                            .foregroundStyle(KKColor.textPrimary).lineLimit(2)
+                    }
+                    if state.showSource, !state.pendingEn.isEmpty {
+                        Text(state.pendingEn)
+                            .kkCaptionLineHeight(fontSize: 13 * scale, lineHeight: 18 * scale)
+                            .font(state.captionFont(CaptionHierarchy.sourceSize * scale))
+                            .foregroundStyle(KKColor.textSecondary).lineLimit(1).truncationMode(.head)
+                    }
+                }
+                .padding(.leading, 10)
+                .overlay(alignment: .leading) { Rectangle().fill(KKColor.brand).frame(width: 2) }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, KKSpace.three)
+        .padding(.vertical, KKSpace.two)
+        .background(KKColor.surfaceBase, in: RoundedRectangle(cornerRadius: KKRadius.md))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("kk-caption-text-slab")
+        // Layout margins belong outside the opaque, content-sized slab.
+        .padding(.horizontal, hostedInNotch || isIsland ? KKSpace.five - hostSideInset : KKSpace.five)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+    private var scale: Double { state.zhFontSize / 18 }
+
+    private func captionRow(_ chunk: CaptionChunk, current: Bool, age: Int) -> some View {
+        VStack(alignment: .leading, spacing: KKSpace.one) {
+            if state.showTranslation {
+                Text(chunk.zh.isEmpty ? (state.compactCaptions
+                    ? (state.translationPaused && !state.showSource ? chunk.en : "…")
+                    : (state.translationPaused ? (state.showSource ? "" : chunk.en) : "…")) : chunk.displayTranslation)
+                    .kkCaptionLineHeight(fontSize: (current ? 17 : 15) * scale, lineHeight: (current ? 24 : 21) * scale)
+                    .font(state.captionFont(CaptionHierarchy.fontSize(current: current, userSize: state.zhFontSize), weight: current ? .medium : .regular))
+                    .foregroundStyle(chunk.zh.isEmpty ? KKColor.textTertiary : current ? KKColor.textPrimary : KKColor.historyInk)
+                    .opacity(current || chunk.zh.isEmpty ? 1 : max(CaptionOpacityPolicy.minimumHistoryInkOpacity, CaptionHierarchy.opacity(age: age)))
+                    .lineLimit(current ? 2 : 1)
+            }
+            // In bilingual mode only the current sentence has a secondary source line.
+            if CaptionHierarchy.showsSource(current: current, showTranslation: state.showTranslation, showSource: state.showSource)
+                && (!state.compactCaptions || (state.showTranslation ? !chunk.zh.isEmpty : true)) {
+                Text(chunk.displaySource)
+                    .kkCaptionLineHeight(fontSize: (state.showTranslation ? 13 : (current ? 17 : 15)) * scale, lineHeight: (state.showTranslation ? 18 : (current ? 24 : 21)) * scale)
+                    .font(state.captionFont((state.showTranslation ? CaptionHierarchy.sourceSize : (current ? CaptionHierarchy.currentSize : CaptionHierarchy.historySize)) * scale))
+                    .foregroundStyle(state.showTranslation ? KKColor.textSecondary : KKColor.textPrimary)
+                    .lineLimit(1).truncationMode(.head)
+            }
+        }
+        .padding(.leading, 10)
+        .overlay(alignment: .leading) {
+            if current { Rectangle().fill(KKColor.brand).frame(width: 2) }
+        }
+        .textSelection(.enabled)
+        .contextMenu {
+            Button(tr("复制译文")) { copy(chunk.zh) }
+            Button(tr("复制原文")) { copy(chunk.en) }
+            Divider()
+            Button(tr("复制全部译文")) { copyAll() }
         }
     }
 

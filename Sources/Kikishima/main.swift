@@ -1,6 +1,14 @@
 // 入口：正常启动 macOS app。
 import AppKit
 
+#if SHOOT || DEBUG
+MainActor.assumeIsolated {
+#if SHOOT || DEBUG
+if ShootSimulation.runIfRequested() { exit(0) }
+#endif
+}
+#endif
+
 // Sparkle follows the app's AppleLanguages preference, while Kikishima's own UI follows uiLanguage.
 // Existing installs need one early relaunch after the two preferences are synchronized.
 _ = AppLanguagePreference.processLanguage

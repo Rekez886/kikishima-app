@@ -12,7 +12,7 @@ struct NotchlessView<Expanded, CompactLeading, CompactTrailing>: View where Expa
     @State private var windowHeight: CGFloat = 0
     private let safeAreaInset: CGFloat = 15
     /// Ink island. Same in light and dark. No popover material.
-    private let ink = Color(red: 15.0 / 255, green: 15.0 / 255, blue: 15.0 / 255)
+    private let ink = Color.black
 
     init(dynamicNotch: DynamicNotch<Expanded, CompactLeading, CompactTrailing>) {
         self.dynamicNotch = dynamicNotch
@@ -26,15 +26,15 @@ struct NotchlessView<Expanded, CompactLeading, CompactTrailing>: View where Expa
         }
     }
 
-    /// Small text inset only. The black shape itself starts at the screen top, over the menu bar.
+    /// Host positions the black shape 8pt below the screen top.
     private var topInset: CGFloat { 8 }
 
     private var panelShape: UnevenRoundedRectangle {
         UnevenRoundedRectangle(
-            topLeadingRadius: 0,
+            topLeadingRadius: cornerRadius,
             bottomLeadingRadius: cornerRadius,
             bottomTrailingRadius: cornerRadius,
-            topTrailingRadius: 0,
+            topTrailingRadius: cornerRadius,
             style: .continuous
         )
     }

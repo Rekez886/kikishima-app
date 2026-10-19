@@ -119,9 +119,15 @@ enum CaptionIslandLayout {
         return CGRect(x: x, y: current.minY, width: width, height: current.height)
     }
 
+    /// Final black shape width, including the host's 15pt side insets.
+    static func compactWidth(notchWidth: CGFloat) -> CGFloat { max(0, notchWidth) + 240 }
+
+    static func expandedWidth(screenWidth: CGFloat) -> CGFloat {
+        min(max(1, screenWidth - 16), screenWidth < 1440 ? max(420, screenWidth * 0.4) : 560)
+    }
+
     static func notchContentSize(visibleFrame: CGRect, widthFraction: CGFloat, height: CGFloat) -> CGSize {
-        let availableWidth = max(1, visibleFrame.width - 24)
-        return CGSize(width: min(availableWidth, max(240, visibleFrame.width * widthFraction)), height: height)
+        CGSize(width: expandedWidth(screenWidth: visibleFrame.width) - 30, height: height)
     }
 
     static let idleHeight: CGFloat = 36
@@ -176,5 +182,34 @@ enum CaptionIslandLayout {
         let x = min(max(centerX - width / 2, minX), max(minX, maxX))
         let y = visibleFrame.maxY - height - topGap
         return CGRect(x: x, y: y, width: width, height: height)
+    }
+}
+
+/// Presentation only: does not change storage, display-mode guards or caption routing.
+enum CaptionHierarchy {
+    static let currentSize: Double = 17
+    static let sourceSize: Double = 13
+    static let historySize: Double = 15
+    static let maximumHistory = 3
+    static func opacity(age: Int) -> Double {
+        [0.85, 0.65, 0.50][min(2, max(0, age - 1))]
+    }
+    /// Only current bilingual captions have a source line. Source-only history
+    /// uses the primary 21pt line, just like translated history.
+    static func historyLimit(userSize: Double, showTranslation: Bool, showSource: Bool, banner: Bool) -> Int {
+        let scale = userSize / 18
+        let current = ((showTranslation ? 48.0 : 0) + (showSource ? 22.0 : 0)) * scale
+        let history = historyLineHeight(showTranslation: showTranslation, showSource: showSource) * scale + 4
+        let available = 153 - 16 - current - (banner ? 40 : 0)
+        return min(maximumHistory, max(0, Int(available / max(1, history))))
+    }
+    static func showsSource(current: Bool, showTranslation: Bool, showSource: Bool) -> Bool {
+        showSource && (current || !showTranslation)
+    }
+    static func historyLineHeight(showTranslation: Bool, showSource: Bool) -> Double {
+        (showTranslation || showSource) ? 25 : 0
+    }
+    static func fontSize(current: Bool, userSize: Double) -> Double {
+        (current ? currentSize : historySize) * userSize / 18
     }
 }

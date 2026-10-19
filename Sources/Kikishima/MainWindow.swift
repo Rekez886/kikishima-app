@@ -6,7 +6,16 @@ import Carbon.HIToolbox
 
 enum MainSection: String, CaseIterable, Identifiable {
     case captions = "字幕", history = "记录", glossary = "术语表", languages = "语言", settings = "设置", help = "帮助"
-    var id: String { rawValue }
+    var id: String {
+        switch self {
+        case .captions: return "captions"
+        case .history: return "history"
+        case .glossary: return "glossary"
+        case .languages: return "languages"
+        case .settings: return "settings"
+        case .help: return "help"
+        }
+    }
     var icon: String {
         switch self {
         case .captions: return "captions.bubble"
@@ -21,37 +30,66 @@ enum MainSection: String, CaseIterable, Identifiable {
 
 struct MainWindowView: View {
     @Bindable var state = CaptionState.shared
+    @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
             VStack(spacing: 0) {
                 SidebarBrandRow()
-                List(selection: $state.mainSection) {
-                    ForEach(MainSection.allCases) { s in
-                        Label(tr(s.rawValue), systemImage: s.icon)
-                            .frame(minHeight: 24).tag(s)
-                    }
-                }
-                .listStyle(.sidebar)
+                SidebarNavigation(selection: $state.mainSection)
                 quotaCard.padding(10)
             }
             // Column preferences alone do not constrain native fitting-size measurement.
             // Give wrapped account text a real width so it cannot inflate the split height.
             .frame(minWidth: 190)
             .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 260)
+            .toolbar(removing: .sidebarToggle)
         } detail: {
-            Group {
-                switch state.mainSection ?? .captions {
-                case .captions: CaptionsHome(state: state)
-                case .history: HistoryView()
-                case .glossary: GlossarySettings(state: state).padding(20)
-                case .languages: LanguagesView(state: state)
-                case .settings: SettingsPane(state: state)
-                case .help: HelpView()
+            VStack(alignment: .leading, spacing: 0) {
+                // Content chrome, outside NSToolbar's native focus/clip wrapper.
+                // Remains available when the sidebar is collapsed.
+                HStack(spacing: 12) {
+                    KKSidebarToggle(visibility: $sidebarVisibility,
+                        showTitle: tr("显示边栏"), hideTitle: tr("隐藏边栏"))
+                        .padding(4) // room for the 2pt gap + 2pt ring
+                    MainPageTitle(title: tr((state.mainSection ?? .captions).rawValue))
                 }
+                .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
+                Group {
+                    switch state.mainSection ?? .captions {
+                    case .captions: CaptionsHome(state: state)
+                    case .history: HistoryView()
+                    case .glossary:
+                        // Keep AX attached to the actual editor, not a virtual replacement editor.
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(tr("每行一条。纯词条 = 保留原文（人名、项目名）；「原词 → 译法」= 指定翻译。"))
+                                .font(.caption).foregroundStyle(KKColor.textSecondary)
+                            TextEditor(text: $state.glossary).kkFocusRing().kkTabNavigation()
+                                .font(.system(size: 13, design: .monospaced))
+                                .accessibilityLabel(tr("术语表"))
+                                .accessibilityHint(tr("每行一条。纯词条 = 保留原文（人名、项目名）；「原词 → 译法」= 指定翻译。"))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(KKColor.textTertiary.opacity(0.3)))
+                            let lines = state.glossary.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+                            Text(tr("%@ / 80 条 · %@ / 4000 字", lines, state.glossary.count))
+                                .font(.caption)
+                                .foregroundStyle(lines > 80 || state.glossary.count > 4000 ? KKColor.warning : KKColor.textSecondary)
+                        }
+                        .padding(12).padding(.horizontal, 20)
+                    case .languages: LanguagesView(state: state)
+                    case .settings: SettingsPane(state: state)
+                    case .help: HelpView()
+                    }
+                }
+                .kkKeyboardPage("main-" + (state.mainSection ?? .captions).id)
+                .id(state.mainSection ?? .captions)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: 704, maxHeight: .infinity, alignment: .topLeading)
+            .frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            // Text actions use brand ink; the native window toolbar keeps its own style.
+            .buttonStyle(KKQuietButtonStyle())
         }
+        .kkNeutralControls()
         .frame(minWidth: 780, minHeight: 520)
         .task { state.refreshPlan() }
     }
@@ -72,8 +110,7 @@ struct MainWindowView: View {
             else if state.subscriptionStatus == "trialing", let days = state.trialDaysLeft {
                 title = tr("试用中 · 还剩 %@ 天", days)
             } else { title = "Pro" }
-            return .init(tier: .pro, email: state.accountEmail, paidTitle: title,
-                usageDescription: state.usageQuota > 0 ? tr("本月已用约 %@ 分钟", state.usageTokens / 4000) : nil)
+            return .init(tier: .pro, email: state.accountEmail, paidTitle: title)
         }
         return .init(tier: .free, email: state.accountEmail,
             remainingMinutes: state.remainingMinutes, remainingDescription: state.remainingText)
@@ -103,10 +140,16 @@ struct CaptionsHome: View {
             translationPaused: state.translationPaused)
     }
     private var previewSource: String {
+        #if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return ShootSimulation.previewSource }
+#endif
         guard state.running || state.starting else { return "Let's review the next steps together." }
         return previewText.source
     }
     private var previewTranslation: String {
+        #if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return ShootSimulation.previewTranslation }
+#endif
         guard state.running || state.starting else { return HomeCaptionPreview.sampleTranslation(for: state.targetLang) }
         return previewText.translation
     }
@@ -115,17 +158,18 @@ struct CaptionsHome: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(state.accountEmail.isEmpty ? "Kikishima" : tr("欢迎回来"))
-                        .font(.system(size: 24, weight: .bold))
-                    Text(state.status).font(.system(size: 13)).foregroundStyle(.secondary)
+                    Text(state.status).font(.system(size: 13))
+                        .foregroundStyle(state.silentTooLong ? KKColor.warning : KKColor.textSecondary)
+                        .accessibilityIdentifier("kk-main-listening-status")
                 }
 
                 if state.sessionToken.isEmpty, !state.loginHint.isEmpty {
-                    Label(state.loginHint, systemImage: "person.crop.circle.badge.exclamationmark").foregroundStyle(.orange)
+                    Label(state.loginHint, systemImage: "person.crop.circle.badge.exclamationmark").foregroundStyle(KKColor.warning)
                 }
 
                 HomeCaptionPreview(
                     source: previewSource, translation: previewTranslation, status: state.status,
+                    warning: state.silentTooLong,
                     compact: state.compactCaptions, display: state.captionDisplay,
                     desktop: state.captionSurface == "window", isExample: !state.running && !state.starting)
 
@@ -134,8 +178,11 @@ struct CaptionsHome: View {
                     paused: state.paused, transition: state.switchingMeetingLanguage || state.resuming,
                     compact: $state.compactCaptions, display: $state.captionDisplay,
                     toggle: { state.toggle() }, pause: { state.paused ? state.resume() : state.pause() })
+                    // Expose the controls that actually receive keyboard focus,
+                    // rather than a separate virtual VStack of replacement controls.
+                    .accessibilityElement(children: .contain)
                 Text(tr("快捷键 %@", GlobalHotkey.displayText))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(KKColor.textSecondary)
                 }
 
                 Divider()
@@ -143,32 +190,44 @@ struct CaptionsHome: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top, spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(tr("会议语言")).font(.caption).foregroundStyle(.secondary)
+                            Text(tr("会议语言")).font(.caption).foregroundStyle(KKColor.textSecondary)
                             Picker(tr("会议语言"), selection: Binding(
                                 get: { state.localeID },
                                 set: { state.selectMeetingLanguage($0) }
                             )) {
                                 ForEach(homeLocales, id: \.self) { id in
-                                    Text(localeName(id) + (state.meetingLocales.contains(id) || state.modelReady(id) ? "" : " · " + tr("需下载"))).tag(id)
+                                    Text(localeName(id) + (state.modelReady(id) ? "" : " · " + tr("需下载"))).tag(id)
                                 }
-                            }
+                            }.kkFocusRing().buttonStyle(.automatic)
                             .labelsHidden().frame(maxWidth: 240)
                             .disabled(state.starting || state.switchingMeetingLanguage || state.resuming)
                         }
-                        Image(systemName: "arrow.right").foregroundStyle(.tertiary).padding(.top, 14)
+                        Image(systemName: "arrow.right").foregroundStyle(KKColor.textTertiary).padding(.top, 14)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(tr("译文语言")).font(.caption).foregroundStyle(.secondary)
+                            Text(tr("译文语言")).font(.caption).foregroundStyle(KKColor.textSecondary)
                             Picker(tr("译文语言"), selection: $state.targetLang) {
                                 ForEach(targetLanguages, id: \.prompt) { lang in Text(lang.display).tag(lang.prompt) }
-                            }
+                            }.kkFocusRing().buttonStyle(.automatic)
                             .labelsHidden().frame(maxWidth: 240)
                             .disabled(state.running || state.starting || state.switchingMeetingLanguage)
+                            .overlay {
+                                if state.running || state.starting || state.switchingMeetingLanguage {
+                                    Text(targetLanguages.first(where: { $0.prompt == state.targetLang })?.display ?? state.targetLang)
+                                        .font(.system(size: 13)).foregroundStyle(KKColor.textTertiary.opacity(0.9))
+                                        .frame(maxWidth: .infinity, minHeight: 24)
+                                        .background(KKColor.surfaceRaised, in: RoundedRectangle(cornerRadius: 5))
+                                        .allowsHitTesting(false).accessibilityHidden(true)
+                                }
+                            }
                         }
                     }
-                    Button(tr("更多语言…")) { state.mainSection = .languages }
-                        .buttonStyle(.link)
+                    Button { state.mainSection = .languages } label: { Text(tr("更多语言…")) }
+                        .buttonStyle(KKLinkButtonStyle())
                 }
-                .task { allLocales = await SpeechTranscriber.supportedLocales.map(\.identifier).sorted() }
+                .task {
+                    await state.refreshModelInstallation()
+                    allLocales = await SpeechTranscriber.supportedLocales.map(\.identifier).sorted()
+                }
 
                 CalendarMeetingCard(coordinator: state.calendarCoordinator,
                                     isRunning: state.running || state.starting)
@@ -179,10 +238,10 @@ struct CaptionsHome: View {
                             Text(tr("Kikishima 可以在会议中持续整理要点，并在停止字幕后生成最终总结。"))
                             Text(tr("音频不会上传。会议文字和你填写的称呼会发送到 Kikishima，并转交 OpenAI 生成总结；服务器不保存内容。关闭会议总结不会关闭本机会议记录。"))
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(KKColor.textSecondary)
                             HStack {
                                 Button(tr("生成会议总结")) { state.setMeetingSummariesEnabled(true) }
-                                    .buttonStyle(.borderedProminent)
+                                    .kkPrimaryButton()
                                 Button(tr("暂不使用")) { state.setMeetingSummariesEnabled(false) }
                             }
                         }
@@ -196,9 +255,88 @@ struct CaptionsHome: View {
                 RecentTranscripts(limit: 2)
             }
             .frame(maxWidth: 640, alignment: .leading)
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 32).padding(.bottom, 32)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
+    }
+}
+
+/// A native segmented Picker exposes both its group name and selected item to VO.
+struct CaptionSegmentAccessibility<Value: Hashable>: View {
+    let title: String
+    @Binding var selection: Value
+    let options: [(String, Value)]
+    var body: some View {
+        Picker(title, selection: $selection) {
+            ForEach(options.indices, id: \.self) { index in
+                Text(options[index].0).tag(options[index].1)
+                    .accessibilityLabel(title + ", " + options[index].0)
+            }
+        }
+        .pickerStyle(.segmented)
+        .buttonStyle(.automatic)
+        .accessibilityLabel(title)
+        .accessibilityValue(options.first(where: { $0.1 == selection })?.0 ?? "")
+    }
+}
+
+/// No native List selection background: selection stays gray regardless of focus.
+struct SidebarNavigation: View {
+    @Binding var selection: MainSection?
+    @FocusState private var focused: MainSection?
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 2) {
+                ForEach(MainSection.allCases) { section in
+                    Button { selection = section } label: {
+                        Label(tr(section.rawValue), systemImage: section.icon)
+                            .foregroundStyle(KKColor.textPrimary)
+                            .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(selection == section ? KKColor.surfaceSelected : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(KKPlainButtonStyle())
+                    .focused($focused, equals: section)
+                    .accessibilityLabel(tr(section.rawValue))
+                    .accessibilityAddTraits(selection == section ? .isSelected : [])
+                }
+            }.padding(8)
+        }
+        .onMoveCommand { direction in
+            let sections = MainSection.allCases
+            let index = sections.firstIndex(of: focused ?? selection ?? .captions) ?? 0
+            let next: Int
+            switch direction {
+            case .up: next = max(0, index - 1)
+            case .down: next = min(sections.count - 1, index + 1)
+            default: return
+            }
+            selection = sections[next]
+            focused = sections[next]
+        }
+    }
+}
+
+/// Determinate grayscale progress with enough width to be useful at any scale.
+struct ModelDownloadProgress: View {
+    let progress: Double
+    private var fraction: Double { progress.isFinite ? min(1, max(0, progress)) : 0 }
+    var body: some View {
+        HStack(spacing: 8) {
+            GeometryReader { geometry in
+                Capsule().fill(KKColor.surfaceRaised)
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(KKColor.textPrimary)
+                            .frame(width: geometry.size.width * fraction)
+                    }
+            }.frame(minWidth: 80, idealWidth: 88, maxWidth: 100, minHeight: 6, maxHeight: 6)
+            Text("\(Int(fraction * 100))%")
+                .font(.caption).monospacedDigit().foregroundStyle(KKColor.textPrimary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(tr("下载中 %@%", Int(fraction * 100)))
+        .accessibilityValue("\(Int(fraction * 100))%")
     }
 }
 
@@ -207,6 +345,8 @@ struct CaptionsHome: View {
 struct TranscriptFile: Identifiable, Hashable, Sendable {
     let url: URL
     var id: URL { url }
+    // UTF-8 hex is deterministic and collision-free, even for localized filenames.
+    var accessibilityID: String { "kk-transcript-row-" + url.absoluteString.utf8.map { String(format: "%02x", $0) }.joined() }
     var name: String { url.deletingPathExtension().lastPathComponent }
     var date: Date { (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast }
 }
@@ -224,14 +364,14 @@ struct RecentTranscripts: View {
     var body: some View {
         GroupBox {
             if files.isEmpty {
-                Text(tr("还没有会议记录。停止字幕时会自动保存到「文稿 › Kikishima」。")).font(.caption).foregroundStyle(.secondary).padding(6)
+                Text(tr("还没有会议记录。停止字幕时会自动保存到「%@」。", CaptionState.transcriptDir.path(percentEncoded: false))).font(.caption).foregroundStyle(KKColor.textSecondary).padding(6)
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(files.prefix(limit)) { f in
                         HStack {
                             Text(f.name).lineLimit(1)
                             Spacer()
-                            Text(f.date, style: .relative).font(.caption).foregroundStyle(.tertiary)
+                            Text(f.date, style: .relative).font(.caption).foregroundStyle(KKColor.textTertiary)
                             Button(tr("打开")) { NSWorkspace.shared.open(f.url) }.controlSize(.small)
                         }
                     }
@@ -247,6 +387,99 @@ struct RecentTranscripts: View {
     }
 }
 
+/// One native list stop. Rows and their mouse-only trash buttons add no key views.
+/// Observe only this window's normal update notifications, never AX or an event monitor.
+private struct TranscriptListSelectionAppearance: NSViewRepresentable {
+    var label: String
+    var focusChanged: (Bool) -> Void
+    final class SelectionView: NSView {
+        weak var table: NSTableView?
+        var label = ""
+        var focusChanged: (Bool) -> Void = { _ in }
+        private var observer: NSObjectProtocol?
+        private var active = false
+        private var pending = false
+        private var retired = false
+        override var acceptsFirstResponder: Bool { false }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        func applyAppearance() {
+            guard !retired else { return }
+            if table == nil {
+                func findTable(_ view: NSView) -> NSTableView? {
+                    if let table = view as? NSTableView { return table }
+                    for child in view.subviews { if let table = findTable(child) { return table } }
+                    return nil
+                }
+                var ancestor = superview
+                while let view = ancestor {
+                    if let found = findTable(view) { table = found; break }
+                    ancestor = view.superview
+                }
+            }
+            guard let table else { return }
+            table.selectionHighlightStyle = .none
+            table.focusRingType = .none
+            table.setAccessibilityLabel(label)
+            table.setAccessibilityIdentifier("kk-transcript-list")
+            let focused = window?.isKeyWindow == true && window?.firstResponder === table
+            guard active != focused else { return }
+            active = focused
+            // A state update cannot synchronously re-enter SwiftUI layout.
+            guard !pending else { return }
+            pending = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.retired else { return }
+                self.pending = false
+                self.focusChanged(self.active)
+            }
+        }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+            if let window {
+                observer = NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification,
+                    object: window, queue: .main) { [weak self] _ in self?.applyAppearance() }
+            }
+            applyAppearance()
+        }
+        override func layout() { super.layout(); applyAppearance() }
+        func retire() {
+            retired = true
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+        }
+        deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+    }
+    func makeNSView(context: Context) -> SelectionView { SelectionView() }
+    func updateNSView(_ view: SelectionView, context: Context) {
+        view.label = label; view.focusChanged = focusChanged; view.applyAppearance()
+    }
+    static func dismantleNSView(_ view: SelectionView, coordinator: ()) { view.retire() }
+}
+
+/// Keep the existing hover trash action accessible to AX/mouse, without an extra Tab stop.
+/// Keyboard users delete the native list selection with Delete or its context menu.
+private struct TranscriptTrashButton: NSViewRepresentable {
+    var action: () -> Void
+    final class ActionButton: NSButton {
+        var perform: () -> Void = {}
+        @objc func invoke() { perform() }
+        override var acceptsFirstResponder: Bool { false }
+    }
+    func makeNSView(context: Context) -> ActionButton {
+        let button = ActionButton(image: NSImage(systemSymbolName: "trash", accessibilityDescription: nil)!, target: nil, action: nil)
+        button.target = button; button.action = #selector(ActionButton.invoke)
+        button.isBordered = false; button.refusesFirstResponder = true; button.focusRingType = .none
+        button.contentTintColor = NSColor(KKColor.error)
+        return button
+    }
+    func updateNSView(_ button: ActionButton, context: Context) {
+        button.perform = action; button.toolTip = tr("删除"); button.setAccessibilityLabel(tr("删除"))
+    }
+}
+
 private struct TranscriptRow: View {
     let file: TranscriptFile
     let onDelete: () -> Void
@@ -256,28 +489,26 @@ private struct TranscriptRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 5) {
                 Text(file.name).font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(KKColor.textPrimary)
                     .lineLimit(2).help(file.name)
-                Text(file.date, style: .date).font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(file.date, style: .date).font(.system(size: 10)).foregroundStyle(KKColor.textSecondary)
             }
             Spacer(minLength: 0)
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .foregroundStyle(.red)
-                    .frame(width: 20, height: 20)
-            }
-            .buttonStyle(.plain)
-            .help(tr("删除"))
-            .opacity(hovering ? 1 : 0)
-            .allowsHitTesting(hovering)
+            TranscriptTrashButton(action: onDelete)
+                .frame(width: 20, height: 20)
+                .opacity(hovering ? 1 : 0)
+                .allowsHitTesting(hovering)
         }
         .onHover { hovering = $0 }
     }
 }
 
 struct HistoryView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable private var state = CaptionState.shared
     @State private var files: [TranscriptFile] = []
     @State private var query = ""
+    @State private var listFocused = false
     @State private var previewSelection: TranscriptFile.ID?
     @State private var selection: Set<TranscriptFile.ID> = []
     @State private var pendingDeletions: [TranscriptFile] = []
@@ -396,22 +627,23 @@ struct HistoryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text(tr("会议记录")).font(.system(size: 24, weight: .bold))
                 Spacer()
                 Button(role: .destructive) {
                     requestDeletion(selectedFiles)
                 } label: {
                     Label(tr("删除所选"), systemImage: "trash")
+                        .foregroundStyle(KKColor.textPrimary)
                 }
+                .buttonStyle(KKQuietButtonStyle())
                 .disabled(selectedFiles.isEmpty)
                 Button(tr("打开文件夹")) {
                     try? FileManager.default.createDirectory(at: CaptionState.transcriptDir, withIntermediateDirectories: true)
                     NSWorkspace.shared.open(CaptionState.transcriptDir)
-                }
+                }.buttonStyle(KKQuietButtonStyle()).foregroundStyle(KKColor.textPrimary)
             }
-            TextField(tr("搜索标题或内容"), text: $query).textFieldStyle(.roundedBorder).frame(maxWidth: 320)
+            TextField(tr("搜索标题或内容"), text: $query, prompt: Text(tr("搜索标题或内容")).foregroundStyle(KKColor.textSecondary)).kkFocusRing().textFieldStyle(.roundedBorder).frame(maxWidth: 320).accessibilityLabel(tr("搜索标题或内容"))
             if files.isEmpty {
-                ContentUnavailableView(tr("还没有会议记录"), systemImage: "doc.text", description: Text(tr("停止字幕时会自动保存到「文稿 › Kikishima」。")))
+                ContentUnavailableView(tr("还没有会议记录"), systemImage: "doc.text", description: Text(tr("停止字幕时会自动保存到「%@」。", CaptionState.transcriptDir.path(percentEncoded: false))))
             } else if shown.isEmpty {
                 ContentUnavailableView.search(text: query)
             } else {
@@ -419,7 +651,18 @@ struct HistoryView: View {
                     // 双击打开、右键更多；删除做成悬停可见入口，避免功能藏得太深
                     List(shown, selection: $selection) { f in
                         TranscriptRow(file: f) { requestDeletion([f]) }
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier(f.accessibilityID)
+                            .accessibilityLabel(f.name)
                             .tag(f.id)
+                            .listRowBackground(
+                                KKColor.surfaceRaised.overlay {
+                                    if selection.contains(f.id) {
+                                        // 7% black gives only 4.24:1; 4% preserves 4.53:1 for dates.
+                                        KKColor.surfaceSelected.opacity(colorScheme == .dark ? 1 : 4.0 / 7.0)
+                                    }
+                                }
+                            )
                             .contentShape(Rectangle())
                     }
                     .contextMenu(forSelectionType: TranscriptFile.ID.self) { ids in
@@ -438,8 +681,16 @@ struct HistoryView: View {
                             NSWorkspace.shared.open(file.url)
                         }
                     }
-                    .listStyle(.sidebar)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .background(KKColor.surfaceRaised)
                     .frame(minWidth: 160, idealWidth: 196, maxWidth: 260)
+                    .accessibilityLabel(tr("记录列表"))
+                    .accessibilityIdentifier("kk-transcript-list")
+                    .background(TranscriptListSelectionAppearance(label: tr("记录列表")) { listFocused = $0 })
+                    .overlay { KKFocusOutline(active: listFocused, radius: 6) }
+                    .padding(4) // keep the 2pt gap + 2pt ring outside the scrolling clip
+                    .onDeleteCommand { requestDeletion(selectedFiles) }
 
                     if let selected = files.first(where: { $0.id == previewSelection }) {
                         MeetingSummaryDetailView(
@@ -459,7 +710,7 @@ struct HistoryView: View {
                 }
             }
         }
-        .padding(28)
+        .padding(.horizontal, 32).padding(.bottom, 32)
         .task { await reload() }
         .onChange(of: state.meetingSummarySnapshot) { Task { await reload() } }
         .onChange(of: state.summaryDiskRevision) { Task { await reload() } }
@@ -508,7 +759,7 @@ struct LanguagesView: View {
         Form {
             Picker(tr("界面语言"), selection: $state.uiLanguage) {
                 ForEach(UILang.all) { l in Text(l.native).tag(l.code) }
-            }
+            }.kkFocusRing().buttonStyle(.automatic)
             .onChange(of: state.uiLanguage) {
                 showingLanguageRelaunchPrompt = AppLanguagePreference.requiresRelaunch(for: state.uiLanguage)
             }
@@ -526,28 +777,40 @@ struct LanguagesView: View {
                     Text(tr("更新窗口等系统界面需要重新启动 Kikishima 才能切换语言。"))
                 }
             }
-            Section(tr("常用会议语言（已预下载模型）")) {
-                Toggle(tr("选了就下载模型（建议在 Wi-Fi 下）"), isOn: $state.autoDownloadModels)
+            Section(tr("常用会议语言")) {
+                Toggle(tr("选了就下载模型（建议在 Wi-Fi 下）"), isOn: $state.autoDownloadModels).toggleStyle(KKSwitchToggleStyle())
                 if state.meetingLocales.isEmpty {
-                    Text(tr("还没选。开始字幕时会按需下载当前会议语言的模型。")).font(.caption).foregroundStyle(.secondary)
+                    Text(tr("还没选。开始字幕时会按需下载当前会议语言的模型。")).font(.caption).foregroundStyle(KKColor.textSecondary)
                 } else {
                     ForEach(state.meetingLocales, id: \.self) { id in
                         HStack {
-                            Text(localeName(id))
-                            Spacer()
-                            if let p = state.modelProgress[id], p < 1 { ProgressView(value: p).frame(width: 60) }
-                            else { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                            Button { state.meetingLocales.removeAll { $0 == id } } label: { Image(systemName: "minus.circle") }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(tr("删除"))
+                            HStack {
+                                Text(localeName(id))
+                                Spacer()
+                                if state.modelReady(id) {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(KKColor.textSecondary)
+                                        .accessibilityLabel(tr("模型已安装"))
+                                } else if let p = state.modelProgress[id], p < 1 {
+                                    ModelDownloadProgress(progress: p)
+                                } else {
+                                    Text(tr("需下载")).foregroundStyle(KKColor.textSecondary)
+                                }
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(localeName(id))
+                            .accessibilityValue(state.modelReady(id) ? tr("已安装") : state.modelProgress[id].map { tr("下载中 %@%", Int($0 * 100)) } ?? tr("需下载"))
+                            Button { state.removeMeetingLocale(id) } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(KKPlainButtonStyle())
+                                .accessibilityLabel(tr("删除 %@", localeName(id)))
                         }
+                        .accessibilityElement(children: .contain)
                     }
                 }
                 Menu(tr("添加会议语言")) {
                     ForEach(sourceLocales.filter { !state.meetingLocales.contains($0.identifier) }, id: \.identifier) { loc in
                         Button(localeName(loc.identifier)) { state.meetingLocales.append(loc.identifier); state.predownloadModels([loc.identifier]) }
                     }
-                }
+                }.kkFocusRing().buttonStyle(.automatic)
             }
             Picker(tr("会议语言（转写）"), selection: Binding(
                 get: { state.localeID },
@@ -558,19 +821,35 @@ struct LanguagesView: View {
                     Text(tr("日语")).tag("ja_JP")
                 } else {
                     ForEach(sourceLocales, id: \.identifier) { loc in
-                        Text(localeName(loc.identifier) + (state.meetingLocales.contains(loc.identifier) || state.modelReady(loc.identifier) ? "" : " · " + tr("需下载"))).tag(loc.identifier)
+                        Text(localeName(loc.identifier) + (state.modelReady(loc.identifier) ? "" : " · " + tr("需下载"))).tag(loc.identifier)
                     }
                 }
-            }
+            }.kkFocusRing().buttonStyle(.automatic)
             .disabled(state.starting || state.switchingMeetingLanguage || state.resuming)
             Picker(tr("译文语言"), selection: $state.targetLang) {
                 ForEach(targetLanguages, id: \.prompt) { lang in Text(lang.display).tag(lang.prompt) }
-            }
+            }.kkFocusRing().buttonStyle(.automatic)
             .disabled(state.running || state.starting || state.switchingMeetingLanguage)
-            CaptionSizeLevelPicker(title: tr("译文字号"), level: $state.captionFontLevel, low: "小", high: "大")
+            .overlay {
+                if state.running || state.starting || state.switchingMeetingLanguage {
+                    Text(targetLanguages.first(where: { $0.prompt == state.targetLang })?.display ?? state.targetLang)
+                        .font(.system(size: 13)).foregroundStyle(KKColor.textTertiary.opacity(0.9))
+                        .frame(maxWidth: .infinity, minHeight: 24)
+                        .background(KKColor.surfaceRaised, in: RoundedRectangle(cornerRadius: 5))
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
+            }
+            LabeledContent(tr("译文字号")) {
+                CaptionSizeLevelPicker(title: tr("译文字号"), level: $state.captionFontLevel, low: "小", high: "大")
+                    .accessibilityRepresentation {
+                        CaptionSegmentAccessibility(title: tr("译文字号"), selection: $state.captionFontLevel,
+                            options: [(tr("小"), "small"), (tr("中"), "medium"), (tr("大"), "large")])
+                    }
+            }
         }
         .formStyle(.grouped)
         .task {
+            await state.refreshModelInstallation()
             let locales = await SpeechTranscriber.supportedLocales
             sourceLocales = locales.sorted { localeName($0.identifier) < localeName($1.identifier) }
         }
@@ -589,47 +868,66 @@ struct SettingsPane: View {
     @State private var hotkeyTick = 0   // 强制刷新快捷键显示
     @FocusState private var inviteFocused: Bool
 
+    private func captionSetting<Content: View>(_ title: String, value: String,
+                                               @ViewBuilder content: () -> Content) -> some View {
+        LabeledContent { content() } label: {
+            Text(title).foregroundStyle(KKColor.textPrimary)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
+        .accessibilityValue(value)
+    }
+
+    private func sizeLabel(_ level: String, low: String, high: String) -> String {
+        tr(level == CaptionSizeLevel.small.rawValue ? low : level == CaptionSizeLevel.large.rawValue ? high : "中")
+    }
+
     var body: some View {
         Form {
             Section(tr("账号")) {
                 if !state.sessionToken.isEmpty {
-                    LabeledContent(tr("邮箱")) { Text(state.accountEmail.isEmpty ? tr("已登录") : state.accountEmail) }
+                    LabeledContent(tr("邮箱")) { Text(state.accountEmail.isEmpty ? tr("已登录") : state.accountEmail).foregroundStyle(KKColor.textTertiary) }
                     LabeledContent(tr("档位")) {
                         if state.plan == "pro" {
                             HStack(spacing: 6) {
-                                Circle().fill(Color(red: 1, green: 59.0 / 255, blue: 31.0 / 255))
+                                Circle().fill(KKColor.textSecondary)
                                     .frame(width: 5, height: 5).accessibilityHidden(true)
-                                Text(state.subscriptionStatus == "trialing" ? tr("Pro（试用中）") : "Pro")
+                                Text(state.subscriptionStatus == "trialing" ? tr("Pro（试用中）") : "Pro").foregroundStyle(KKColor.textTertiary)
                             }
                         } else {
-                            Text(state.plan == "dev" ? tr("开发") : tr("免费版 · 每周 60 分钟"))
+                            Text(state.plan == "dev" ? tr("开发") : tr("免费版 · 每周 60 分钟")).foregroundStyle(KKColor.textTertiary)
                         }
                     }
-                    if let exp = state.planExpires { LabeledContent(state.subscriptionStatus == "trialing" ? tr("试用到") : tr("到期")) { Text(exp) } }
+                    if let exp = state.planExpires { LabeledContent(state.subscriptionStatus == "trialing" ? tr("试用到") : tr("到期")) { Text(exp).foregroundStyle(KKColor.textTertiary) } }
                     HStack {
-                        if state.plan != "pro" && state.plan != "dev" { Button(tr("升级 Pro")) { state.openUpgrade() } }
+                        if state.plan != "pro" && state.plan != "dev" {
+                            Button(tr("升级 Pro")) { state.openUpgrade() }
+                                .kkPrimaryButton()
+                        }
                         Spacer()
                         Button(tr("刷新订阅状态")) { state.refreshPlan() }
+                        .buttonStyle(KKLinkButtonStyle())
                         Button(tr("退出登录")) { state.signOut() }
+                        .buttonStyle(KKLinkButtonStyle())
                     }
                     if state.plan != "pro" && state.plan != "dev" {
-                        Text(tr("请用与账号相同的邮箱付款，才能自动升级。")).font(.caption).foregroundStyle(.secondary)
+                        Text(tr("请用与账号相同的邮箱付款，才能自动升级。")).font(.caption).foregroundStyle(KKColor.textSecondary)
                         // 邀请码用于兑换终身 / 限期 Pro，区别于 Polar 结账页的折扣码
                         HStack {
-                            TextField(tr("有邀请码？"), text: $invite)
+                            TextField(tr("有邀请码？"), text: $invite).kkFocusRing()
                                 .focused($inviteFocused)
                                 .onSubmit { state.redeemInvite(invite) }
                             Button(state.activating ? tr("验证中…") : tr("兑换")) { state.redeemInvite(invite) }
                                 .disabled(invite.trimmingCharacters(in: .whitespaces).count < 8 || state.activating)
                         }
-                        Text(tr("邀请码在这里兑换，不用绑支付方式；它不是结账页的折扣码。")).font(.caption).foregroundStyle(.secondary)
+                        Text(tr("邀请码在这里兑换，不用绑支付方式；它不是结账页的折扣码。")).font(.caption).foregroundStyle(KKColor.textSecondary)
                         .onAppear { if state.focusInvite { inviteFocused = true; state.focusInvite = false } }
                         .onChange(of: state.focusInvite) { if state.focusInvite { inviteFocused = true; state.focusInvite = false } }
                     }
                 } else if state.codeSent {
-                    LabeledContent(tr("邮箱")) { Text(state.accountEmail).foregroundStyle(.secondary) }
+                    LabeledContent(tr("邮箱")) { Text(state.accountEmail).foregroundStyle(KKColor.textSecondary) }
                     HStack {
-                        TextField(tr("6 位验证码"), text: $code).onSubmit { state.verifyEmailCode(code: code) }
+                        TextField(tr("6 位验证码"), text: $code).kkFocusRing().onSubmit { state.verifyEmailCode(code: code) }
                         Button(state.activating ? tr("验证中…") : tr("登录")) { state.verifyEmailCode(code: code) }
                             .disabled(code.filter(\.isNumber).count != 6 || state.activating)
                     }
@@ -638,10 +936,10 @@ struct SettingsPane: View {
                         Button(tr("重新发送")) { state.requestEmailCode(email: state.accountEmail) }.disabled(state.activating)
                     }.font(.caption)
                 } else {
-                    if !state.loginHint.isEmpty { Text(state.loginHint).font(.callout).foregroundStyle(.orange) }
-                    let hasSocial = GoogleSignIn.isConfigured || state.canSignInWithApple
+                    if !state.loginHint.isEmpty { Text(state.loginHint).font(.callout).foregroundStyle(KKColor.warning) }
+                    let hasSocial = state.serverProviders.google || state.canSignInWithApple
                     VStack(spacing: 8) {
-                        if GoogleSignIn.isConfigured {
+                        if state.serverProviders.google {
                             SignInTile(title: tr("使用 Google 登录"), icon: "globe") { state.signInWithGoogle() }.disabled(state.activating)
                         }
                         if state.canSignInWithApple {
@@ -654,38 +952,38 @@ struct SettingsPane: View {
                     }
                     if showEmailSignIn || !hasSocial {
                         HStack {
-                            TextField(tr("邮箱"), text: $email).textContentType(.emailAddress).onSubmit { state.requestEmailCode(email: email) }
+                            TextField(tr("邮箱"), text: $email)
+                                .accessibilityLabel(tr("邮箱"))
+                                .accessibilityIdentifier("kk-settings-email").kkFocusRing().textContentType(.emailAddress).onSubmit { state.requestEmailCode(email: email) }
                             Button(state.activating ? tr("发送中…") : tr("发送验证码")) { state.requestEmailCode(email: email) }
                                 .disabled(!email.contains("@") || state.activating)
                         }
                     }
-                    Text(tr("免费版每周 60 分钟，登录即用；付费后同一邮箱自动升级 Pro。")).font(.caption).foregroundStyle(.secondary)
+                    Text(tr("免费版每周 60 分钟，登录即用；付费后同一邮箱自动升级 Pro。")).font(.caption).foregroundStyle(KKColor.textSecondary)
                 }
-                if !state.activationError.isEmpty { Text(state.activationError).font(.caption).foregroundStyle(.red) }
+                if !state.activationError.isEmpty { Text(state.activationError).font(.caption).foregroundStyle(KKColor.error) }
             }
 
             Section(tr("快捷键")) {
-                Picker(tr("方式"), selection: Binding(get: { GlobalHotkey.mode }, set: { GlobalHotkey.mode = $0; hotkeyTick += 1 })) {
-                    Text(tr("双击左 ⌘")).tag(GlobalHotkey.Mode.doubleCommand)
-                    Text(tr("组合键")).tag(GlobalHotkey.Mode.combo)
-                }
-                .pickerStyle(.segmented)
+                KKSegmentedPicker(title: tr("方式"), selection: Binding(get: { GlobalHotkey.mode }, set: { GlobalHotkey.mode = $0; hotkeyTick += 1 }), options: [(tr("双击左 ⌘"), GlobalHotkey.Mode.doubleCommand), (tr("组合键"), GlobalHotkey.Mode.combo)])
+                .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("方式"), selection: Binding(get: { GlobalHotkey.mode }, set: { GlobalHotkey.mode = $0; hotkeyTick += 1 }), options: [(tr("双击左 ⌘"), GlobalHotkey.Mode.doubleCommand), (tr("组合键"), GlobalHotkey.Mode.combo)]) }
                 if GlobalHotkey.mode == .doubleCommand {
                     if GlobalHotkey.inputMonitoringGranted {
-                        Text(tr("已授权「输入监控」，双击左 ⌘ 开关字幕。")).font(.caption).foregroundStyle(.secondary)
+                        Text(tr("已授权「输入监控」，双击左 ⌘ 开关字幕。")).font(.caption).foregroundStyle(KKColor.textSecondary)
                     } else {
                         HStack {
-                            Text(tr("需要「输入监控」权限；未授权前用 %@。", GlobalHotkey.comboDisplay)).font(.caption).foregroundStyle(.orange)
+                            Text(tr("需要「输入监控」权限；未授权前用 %@。", GlobalHotkey.comboDisplay)).font(.caption).foregroundStyle(KKColor.warning)
                             Button(tr("授予权限")) { _ = GlobalHotkey.requestInputMonitoring(); GlobalHotkey.reinstall(); hotkeyTick += 1 }
+                            .buttonStyle(KKLinkButtonStyle())
                         }
                     }
                 } else {
                     HotkeyRecorder(onChange: { hotkeyTick += 1 })
                 }
                 if GlobalHotkey.effectiveMode == .combo, GlobalHotkey.lastRegisterError != 0 {
-                    Text(tr("组合键注册失败（可能被其他 app 占用），换一个")).font(.caption).foregroundStyle(.orange).id(hotkeyTick)
+                    Text(tr("组合键注册失败（可能被其他 app 占用），换一个")).font(.caption).foregroundStyle(KKColor.warning).id(hotkeyTick)
                 } else {
-                    Text(tr("当前生效：%@", GlobalHotkey.displayText)).font(.caption2).foregroundStyle(.tertiary).id(hotkeyTick)
+                    Text(tr("当前生效：%@", GlobalHotkey.displayText)).font(.caption2).foregroundStyle(KKColor.textTertiary).id(hotkeyTick)
                 }
             }
 
@@ -700,103 +998,104 @@ struct SettingsPane: View {
                         get: { state.summaryConsent == .enabled && state.meetingSummariesEnabled },
                         set: { state.setMeetingSummariesEnabled($0) }
                     )
-                )
+                ).toggleStyle(KKSwitchToggleStyle())
                 Text(tr("我的会议称呼"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextEditor(text: $state.summaryAliasesText)
+                    .foregroundStyle(KKColor.textSecondary)
+                TextEditor(text: $state.summaryAliasesText).kkFocusRing().kkTabNavigation()
+                    .accessibilityLabel(tr("我的会议称呼"))
                     .font(.system(size: 13))
                     .frame(minHeight: 72, maxHeight: 110)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(KKColor.textTertiary.opacity(0.3)))
                 Text(tr("每行一个称呼，最多 10 个。"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KKColor.textSecondary)
                 Text(tr("只有会议中明确提到这些称呼的内容才会归到“与你相关”；没有名字的“你来做”暂时无法可靠判断。"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KKColor.textSecondary)
                 Text(tr("音频不会上传。会议文字和你填写的称呼会发送到 Kikishima，并转交 OpenAI 生成总结；服务器不保存内容。关闭会议总结不会关闭本机会议记录。"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KKColor.textSecondary)
             }
 
             Section(tr("更新")) {
-                Toggle(tr("自动检查更新"), isOn: Binding(get: { UpdaterController.shared.automaticallyChecks }, set: { UpdaterController.shared.automaticallyChecks = $0 }))
-                Toggle(tr("自动下载并在下次启动时安装"), isOn: Binding(get: { UpdaterController.shared.automaticallyDownloads }, set: { UpdaterController.shared.automaticallyDownloads = $0 }))
+                Toggle(tr("自动检查更新"), isOn: Binding(get: { UpdaterController.shared.automaticallyChecks }, set: { UpdaterController.shared.automaticallyChecks = $0 })).toggleStyle(KKSwitchToggleStyle())
+                Toggle(tr("自动下载并在下次启动时安装"), isOn: Binding(get: { UpdaterController.shared.automaticallyDownloads }, set: { UpdaterController.shared.automaticallyDownloads = $0 })).toggleStyle(KKSwitchToggleStyle())
                     .disabled(!UpdaterController.shared.automaticallyChecks)
                 HStack {
                     Button(tr("检查更新…")) { UpdaterController.shared.checkForUpdates() }.disabled(!UpdaterController.shared.canCheck)
                     Spacer()
                     if let d = UpdaterController.shared.lastCheck {
-                        Text(tr("上次检查：%@", d.formatted(date: .abbreviated, time: .shortened))).font(.caption).foregroundStyle(.secondary)
+                        Text(tr("上次检查：%@", d.formatted(date: .abbreviated, time: .shortened))).font(.caption).foregroundStyle(KKColor.textSecondary)
                     }
                 }
-                Text(tr("当前版本 %@", Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")).font(.caption).foregroundStyle(.tertiary)
+                Text(tr("当前版本 %@", Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")).font(.caption).foregroundStyle(KKColor.textTertiary)
             }
             Section(tr("字幕窗")) {
-                Picker(tr("字幕位置"), selection: $state.captionSurface) {
-                    Text(tr("灵动岛")).tag("island")
-                    Text(tr("桌面窗口")).tag("window")
+                captionSetting(tr("字幕位置"), value: tr(state.captionSurface == "island" ? "灵动岛" : "桌面窗口")) {
+                    KKSegmentedPicker(title: tr("字幕位置"), selection: Binding(get: { state.captionSurface }, set: { state.selectCaptionSurface($0) }), options: [(tr("灵动岛"), "island"), (tr("桌面窗口"), "window")])
+                    .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("字幕位置"), selection: Binding(get: { state.captionSurface }, set: { state.selectCaptionSurface($0) }), options: [(tr("灵动岛"), "island"), (tr("桌面窗口"), "window")]) }
                 }
-                .pickerStyle(.segmented)
-                Text(tr("灵动岛贴在摄像头下方；桌面窗口可拖动、可改大小。")).font(.caption).foregroundStyle(.secondary)
-                Picker(tr("显示内容"), selection: $state.captionDisplay) {
-                    Text(tr("原文 + 译文")).tag("both")
-                    Text(tr("仅译文")).tag("translation")
-                    Text(tr("仅原文")).tag("source")
+                Text(state.captionSurface == "window" ? tr("桌面窗口可拖动、可改大小。") : tr("灵动岛贴在摄像头下方；桌面窗口可拖动、可改大小。")).font(.caption).foregroundStyle(KKColor.textSecondary)
+                captionSetting(tr("显示内容"), value: tr(state.captionDisplay == "both" ? "双语" : state.captionDisplay == "translation" ? "仅译文" : "仅原文")) {
+                    KKSegmentedPicker(title: tr("显示内容"), selection: $state.captionDisplay, options: [(tr("双语"), "both"), (tr("仅译文"), "translation"), (tr("仅原文"), "source")])
+                    .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("显示内容"), selection: $state.captionDisplay, options: [(tr("双语"), "both"), (tr("仅译文"), "translation"), (tr("仅原文"), "source")]) }
                 }
-                .pickerStyle(.segmented)
-                CaptionSizeLevelPicker(title: tr("字幕窗宽度"), level: $state.captionWidthLevel, low: "窄", high: "宽")
+                captionSetting(tr("字幕窗宽度"), value: sizeLabel(state.captionWidthLevel, low: "窄", high: "宽")) {
+                    CaptionSizeLevelPicker(title: tr("字幕窗宽度"), level: $state.captionWidthLevel, low: "窄", high: "宽")
+                    .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("字幕窗宽度"), selection: $state.captionWidthLevel, options: [(tr("窄"), "small"), (tr("中"), "medium"), (tr("宽"), "large")]) }
+                }
                 if state.supportsIslandSizing {
-                    CaptionSizeLevelPicker(title: tr("高度"), level: $state.islandHeightLevel, low: "低", high: "高")
-                }
-                Picker(tr("字幕长度"), selection: $state.chunkLength) {
-                    Text(tr("短")).tag("short")
-                    Text(tr("中")).tag("medium")
-                    Text(tr("长")).tag("long")
-                }
-                .pickerStyle(.segmented)
-                Text(tr("更长 = 一句更完整、更连贯，但每句晚出 1～2 秒。")).font(.caption).foregroundStyle(.secondary)
-                if state.captionSurface == "window" {
-                    Slider(value: $state.captionOpacity, in: 0.3...1.0) { Text(tr("背景不透明度 %@%", Int(state.captionOpacity * 100))) }
-                }
-                CaptionSizeLevelPicker(title: tr("译文字号"), level: $state.captionFontLevel, low: "小", high: "大")
-                Picker(tr("字体"), selection: $state.captionFontFamily) {
-                    Text(tr("系统")).tag("system")
-                    Text(tr("圆体")).tag("rounded")
-                    Text(tr("衬线")).tag("serif")
-                    Text(tr("等宽")).tag("mono")
-                }
-                .pickerStyle(.segmented)
-                if state.supportsIslandSizing {
-                    Picker(tr("无人说话后收回"), selection: $state.islandCollapseLevel) {
-                        Text(tr("关")).tag(CaptionCollapseLevel.off.rawValue)
-                        Text(tr("快")).tag(CaptionCollapseLevel.fast.rawValue)
-                        Text(tr("中")).tag(CaptionCollapseLevel.medium.rawValue)
-                        Text(tr("慢")).tag(CaptionCollapseLevel.slow.rawValue)
+                    captionSetting(tr("高度"), value: sizeLabel(state.islandHeightLevel, low: "低", high: "高")) {
+                        CaptionSizeLevelPicker(title: tr("高度"), level: $state.islandHeightLevel, low: "低", high: "高")
+                        .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("高度"), selection: $state.islandHeightLevel, options: [(tr("低"), "small"), (tr("中"), "medium"), (tr("高"), "large")]) }
                     }
-                    .pickerStyle(.segmented)
+                }
+                captionSetting(tr("字幕长度"), value: tr(state.chunkLength == "short" ? "短" : state.chunkLength == "long" ? "长" : "中")) {
+                    KKSegmentedPicker(title: tr("字幕长度"), selection: $state.chunkLength, options: [(tr("短"), "short"), (tr("中"), "medium"), (tr("长"), "long")])
+                    .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("字幕长度"), selection: $state.chunkLength, options: [(tr("短"), "short"), (tr("中"), "medium"), (tr("长"), "long")]) }
+                }
+                Text(tr("更长 = 一句更完整、更连贯，但每句晚出 1～2 秒。")).font(.caption).foregroundStyle(KKColor.textSecondary)
+                if state.captionSurface == "window" {
+                    Slider(value: $state.captionOpacity, in: CaptionOpacityPolicy.minimum...1.0) { Text(tr("背景不透明度 %@%", Int(state.captionOpacity * 100))) }
+                        .accessibilityLabel(tr("背景不透明度 %@%", Int(state.captionOpacity * 100)))
+                        .accessibilityIdentifier("kk-caption-opacity").kkFocusRing()
+                }
+                captionSetting(tr("译文字号"), value: sizeLabel(state.captionFontLevel, low: "小", high: "大")) {
+                    CaptionSizeLevelPicker(title: tr("译文字号"), level: $state.captionFontLevel, low: "小", high: "大")
+                    .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("译文字号"), selection: $state.captionFontLevel, options: [(tr("小"), "small"), (tr("中"), "medium"), (tr("大"), "large")]) }
+                }
+                captionSetting(tr("字体"), value: tr(state.captionFontFamily == "rounded" ? "圆体" : state.captionFontFamily == "serif" ? "衬线" : state.captionFontFamily == "mono" ? "等宽" : "系统")) {
+                    KKSegmentedPicker(title: tr("字体"), selection: $state.captionFontFamily, options: [(tr("系统"), "system"), (tr("圆体"), "rounded"), (tr("衬线"), "serif"), (tr("等宽"), "mono")])
+                    .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("字体"), selection: $state.captionFontFamily, options: [(tr("系统"), "system"), (tr("圆体"), "rounded"), (tr("衬线"), "serif"), (tr("等宽"), "mono")]) }
+                }
+                if state.supportsIslandSizing {
+                    captionSetting(tr("无人说话后收回"), value: tr(state.islandCollapseLevel == "off" ? "关" : state.islandCollapseLevel == "fast" ? "快" : state.islandCollapseLevel == "slow" ? "慢" : "中")) {
+                        KKSegmentedPicker(title: tr("无人说话后收回"), selection: $state.islandCollapseLevel, options: [(tr("关"), CaptionCollapseLevel.off.rawValue), (tr("快"), CaptionCollapseLevel.fast.rawValue), (tr("中"), CaptionCollapseLevel.medium.rawValue), (tr("慢"), CaptionCollapseLevel.slow.rawValue)])
+                        .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("无人说话后收回"), selection: $state.islandCollapseLevel, options: [(tr("关"), CaptionCollapseLevel.off.rawValue), (tr("快"), CaptionCollapseLevel.fast.rawValue), (tr("中"), CaptionCollapseLevel.medium.rawValue), (tr("慢"), CaptionCollapseLevel.slow.rawValue)]) }
+                    }
                 }
                 if state.captionSurface == "window" {
-                    Toggle(tr("紧凑字幕点击穿透（鼠标直接点到下面的窗口）"), isOn: $state.captionClickThrough)
+                    Toggle(tr("紧凑字幕点击穿透（鼠标直接点到下面的窗口）"), isOn: $state.captionClickThrough).toggleStyle(KKSwitchToggleStyle())
                     Text(tr("仅桌面紧凑字幕生效，开启后无法点击工具条或拖动窗口。可在这里关闭；停止字幕也可用菜单栏或快捷键。"))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(KKColor.textSecondary)
                 }
-                Toggle(tr("允许字幕窗出现在屏幕共享中"), isOn: $state.captionsVisibleInScreenShare)
-                Text(tr("默认关闭：共享屏幕时对方看不到你的字幕。")).font(.caption).foregroundStyle(.secondary)
+                Toggle(tr("允许字幕窗出现在屏幕共享中"), isOn: $state.captionsVisibleInScreenShare).toggleStyle(KKSwitchToggleStyle())
+                Text(tr("默认关闭：共享屏幕时对方看不到你的字幕。")).font(.caption).foregroundStyle(KKColor.textSecondary)
             }
             Section(tr("常规")) {
                 Toggle(tr("登录时自动启动"), isOn: Binding(
                     get: { launchAtLogin.isEnabled },
-                    set: { launchAtLogin.setEnabled($0) }))
-                Toggle(tr("启动时显示主窗口"), isOn: Binding(get: { AppDelegate.showMainOnLaunch }, set: { AppDelegate.showMainOnLaunch = $0 }))
-                Toggle(tr("在 Dock 显示图标"), isOn: Binding(get: { AppDelegate.showDockIcon }, set: { AppDelegate.showDockIcon = $0 }))
+                    set: { launchAtLogin.setEnabled($0) })).toggleStyle(KKSwitchToggleStyle())
+                Toggle(tr("启动时显示主窗口"), isOn: Binding(get: { AppDelegate.showMainOnLaunch }, set: { AppDelegate.showMainOnLaunch = $0 })).toggleStyle(KKSwitchToggleStyle())
+                Toggle(tr("在 Dock 显示图标"), isOn: Binding(get: { AppDelegate.showDockIcon }, set: { AppDelegate.showDockIcon = $0 })).toggleStyle(KKSwitchToggleStyle())
                 LabeledContent(tr("会议记录保存位置")) {
                     HStack {
-                        Text(CaptionState.transcriptDir.path(percentEncoded: false)).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Text(CaptionState.transcriptDir.path(percentEncoded: false)).font(.caption).foregroundStyle(KKColor.textSecondary).lineLimit(1).truncationMode(.middle)
                         Button(tr("打开文件夹")) {
                             try? FileManager.default.createDirectory(at: CaptionState.transcriptDir, withIntermediateDirectories: true)
                             NSWorkspace.shared.open(CaptionState.transcriptDir)
-                        }
+                        }.buttonStyle(KKQuietButtonStyle()).foregroundStyle(KKColor.textPrimary)
                         Button(tr("更改…")) { chooseTranscriptDir() }
                     }
                 }
@@ -843,9 +1142,9 @@ struct HotkeyRecorder: View {
                 Button(recording ? tr("请按下组合键…") : display) { recording ? stop() : start() }
                     .frame(minWidth: 140)
                 if recording { Button(tr("取消")) { stop() } }
-                Text(recording ? tr("按 Esc 取消") : tr("需含 ⌃ ⌥ ⇧ ⌘ 中至少一个")).font(.caption).foregroundStyle(.secondary)
+                Text(recording ? tr("按 Esc 取消") : tr("需含 ⌃ ⌥ ⇧ ⌘ 中至少一个")).font(.caption).foregroundStyle(KKColor.textSecondary)
             }
-            if !warning.isEmpty { Text(warning).font(.caption).foregroundStyle(.orange) }
+            if !warning.isEmpty { Text(warning).font(.caption).foregroundStyle(KKColor.warning) }
         }
         .onDisappear { stop() }   // 录制中切走 / 关窗：监视器必须跟着销毁，否则全 app 键盘被吞
     }
@@ -886,14 +1185,13 @@ struct HelpView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text(tr("帮助")).font(.system(size: 24, weight: .bold))
                 GroupBox(tr("怎么用")) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(tr("1. 开会前在「语言」里选好会议语言和译文语言。"))
                         Text(tr("2. 会议开始后，菜单栏点图标 → 开始字幕，或按 %@。", GlobalHotkey.displayText))
-                        Text(tr("3. 字幕窗浮在会议窗口上，贴在屏幕顶部。"))
+                        Text(tr("3. 字幕默认显示在屏幕顶部的灵动岛，也可在菜单面板切到桌面窗口。"))
                         Text(tr("4. 停止时记录自动保存到「文稿 › Kikishima」。"))
-                        Text(tr("只字幕你听到的声音；你自己说的话不会被记录。")).foregroundStyle(.secondary)
+                        Text(tr("只字幕你听到的声音；你自己说的话不会被记录。")).foregroundStyle(KKColor.textSecondary)
                     }.padding(6)
                 }
                 GroupBox(tr("隐私")) {
@@ -903,9 +1201,10 @@ struct HelpView: View {
                     Text(tr("macOS 26 (Tahoe) 及以上，Apple Silicon。首次使用会下载一次 Apple 离线转写模型。")).padding(6)
                 }
                 Button(tr("重新运行首次引导")) { OnboardingController.shared.restart() }
+                .buttonStyle(KKLinkButtonStyle())
                 AboutView().frame(maxWidth: .infinity)
             }
-            .padding(28)
+            .padding(.horizontal, 32).padding(.bottom, 32)
         }
     }
 }

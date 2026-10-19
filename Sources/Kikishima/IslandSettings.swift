@@ -8,12 +8,7 @@ struct CaptionSizeLevelPicker: View {
     let high: String
 
     var body: some View {
-        Picker(title, selection: $level) {
-            Text(tr(low)).tag(CaptionSizeLevel.small.rawValue)
-            Text(tr("中")).tag(CaptionSizeLevel.medium.rawValue)
-            Text(tr(high)).tag(CaptionSizeLevel.large.rawValue)
-        }
-        .pickerStyle(.segmented)
+        KKSegmentedPicker(title: title, selection: $level, options: [(tr(low), CaptionSizeLevel.small.rawValue), (tr("中"), CaptionSizeLevel.medium.rawValue), (tr(high), CaptionSizeLevel.large.rawValue)])
     }
 }
 
@@ -39,38 +34,26 @@ struct IslandSettingsCard: View {
                 }
             }
             row(tr("字体")) {
-                Picker("", selection: $state.captionFontFamily) {
-                    Text(tr("系统")).tag("system")
-                    Text(tr("圆体")).tag("rounded")
-                    Text(tr("衬线")).tag("serif")
-                    Text(tr("等宽")).tag("mono")
-                }
-                .pickerStyle(.segmented).labelsHidden()
+                KKSegmentedPicker(title: tr("字体"), selection: $state.captionFontFamily, options: [(tr("系统"), "system"), (tr("圆体"), "rounded"), (tr("衬线"), "serif"), (tr("等宽"), "mono")]).labelsHidden()
             }
 
             if state.supportsIslandSizing {
                 Divider()
 
                 row(tr("无人说话后收回")) {
-                    Picker("", selection: $state.islandCollapseLevel) {
-                        Text(tr("关")).tag(CaptionCollapseLevel.off.rawValue)
-                        Text(tr("快")).tag(CaptionCollapseLevel.fast.rawValue)
-                        Text(tr("中")).tag(CaptionCollapseLevel.medium.rawValue)
-                        Text(tr("慢")).tag(CaptionCollapseLevel.slow.rawValue)
-                    }
-                    .pickerStyle(.segmented).labelsHidden()
+                    KKSegmentedPicker(title: tr("无人说话后收回"), selection: $state.islandCollapseLevel, options: [(tr("关"), CaptionCollapseLevel.off.rawValue), (tr("快"), CaptionCollapseLevel.fast.rawValue), (tr("中"), CaptionCollapseLevel.medium.rawValue), (tr("慢"), CaptionCollapseLevel.slow.rawValue)]).labelsHidden()
                 }
             }
         }
         .padding(14)
         .frame(width: 300)
-        .foregroundStyle(Color.primary)
-        .tint(.accentColor)
+        .foregroundStyle(KKColor.textPrimary)
+        .kkNeutralControls()
     }
 
     private func row<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(label).font(.system(size: 12)).foregroundStyle(KKColor.textSecondary)
             content()
         }
     }

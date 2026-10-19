@@ -31,21 +31,39 @@ func tr(_ key: String, _ args: Any...) -> String {
                     .init(tier: .free, email: "sample@example.com", remainingMinutes: 0, remainingDescription: "<1"),
                     .init(tier: .free, email: "sample@example.com")
                 ]
-                let row = HStack(alignment: .top, spacing: 16) {
+                let row = VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .top, spacing: 16) {
                     ForEach(Array(samples.enumerated()), id: \.offset) { _, sample in
                         VStack(spacing: 0) {
                             SidebarBrandRow()
+                            SidebarNavigation(selection: .constant(.captions))
                             Spacer(minLength: 16)
                             SidebarAccountCard(summary: sample, login: {}, upgrade: {}, redeemInvite: {}, signOut: {})
                                 .padding(10)
                         }
-                        .frame(width: 190, height: 410)
+                        .frame(width: 190, height: 640)
                         .background(Color(nsColor: .windowBackgroundColor))
+                    }
+                    }
+                    // TranslateFailure cases whose live banner action is .upgrade:
+                    // paymentRequired, quotaExceeded, freePoolExhausted.
+                    HStack(alignment: .top, spacing: 16) {
+                        ForEach([
+                            tr("需要订阅 Pro 才能继续翻译"),
+                            tr("本周免费额度已用完，%@ 重置", "2026-10-19"),
+                            tr("今日免费额度已被用完，明天再来，或升级 Pro 不受影响")
+                        ], id: \.self) { message in
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(message).font(.callout).fixedSize(horizontal: false, vertical: true)
+                                Button(tr("升级 Pro")) {}.kkPrimaryButton()
+                            }.padding(16).frame(width: 380, height: 160, alignment: .topLeading)
+                                .background(KKColor.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
+                        }
                     }
                 }.padding(16).environment(\.colorScheme, dark ? .dark : .light)
                 let host = NSHostingView(rootView: row)
                 host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-                let size = NSSize(width: 1252, height: 442)
+                let size = NSSize(width: 1252, height: 848)
                 let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                                       styleMask: [.borderless], backing: .buffered, defer: false)
                 window.isReleasedWhenClosed = false
@@ -60,6 +78,6 @@ func tr(_ key: String, _ args: Any...) -> String {
                 window.close()
             }
         }
-        print("Rendered 6 synthetic account variants in 5 languages, light and dark")
+        print("Rendered 6 synthetic account variants (signedOut/free/pro, trial, quota exhausted, usage unknown) and 3 upgrade failure cases in 5 languages, light and dark")
     }
 }

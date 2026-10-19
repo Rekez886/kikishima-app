@@ -10,14 +10,14 @@ private func makeContent(
         overview: [SummaryBlock(id: "overview-1", text: "Localization planning meeting", sourceRefs: [ref])],
         currentState: [],
         decisions: [],
-        actionItems: [SummaryActionItem(id: "action-1", text: "Send the Japanese slides", owner: "Jay", deadline: "Friday", sourceRefs: [ref])],
+        actionItems: [SummaryActionItem(id: "action-1", text: "Send the Japanese slides", owner: "Ken", deadline: "Friday", sourceRefs: [ref])],
         personalItems: [SummaryBlock(id: "personal-1", text: personalText, sourceRefs: [ref])],
         openQuestions: []
     )
 }
 
 private func testDocumentRoundTripPreservesEvidence() throws {
-    let segment = SummarySourceSegment(id: "chunk-1", startSeconds: 185, text: "Jay, please send the Japanese slides by Friday.")
+    let segment = SummarySourceSegment(id: "chunk-1", startSeconds: 185, text: "Ken, please send the Japanese slides by Friday.")
     let document = MeetingSummaryDocument(
         recordID: "record-1",
         transcriptFileName: "meeting.md",
@@ -38,10 +38,10 @@ private func testDocumentRoundTripPreservesEvidence() throws {
 }
 
 private func testAliasMatchingUsesBoundariesAndCJKNormalization() {
-    precondition(SummaryAliasMatcher.containsAlias(in: "Jay, please send it", aliases: ["jay"]))
-    precondition(!SummaryAliasMatcher.containsAlias(in: "Jayden owns it", aliases: ["Jay"]), "Latin aliases must not match inside a longer name")
+    precondition(SummaryAliasMatcher.containsAlias(in: "Ken, please send it", aliases: ["ken"]))
+    precondition(!SummaryAliasMatcher.containsAlias(in: "Kenji owns it", aliases: ["Ken"]), "Latin aliases must not match inside a longer name")
     precondition(SummaryAliasMatcher.containsAlias(in: "小田さんお願いします", aliases: ["小田"]))
-    precondition(SummaryAliasMatcher.containsAlias(in: "ＪＡＹ さん", aliases: ["jay"]), "Compatibility-width Latin text must normalize")
+    precondition(SummaryAliasMatcher.containsAlias(in: "ＫＥＮ さん", aliases: ["ken"]), "Compatibility-width Latin text must normalize")
 }
 
 private func testSummaryPreferencesArePrivacyConservative() {
@@ -50,20 +50,20 @@ private func testSummaryPreferencesArePrivacyConservative() {
     precondition(MeetingSummaryPreferences.shouldGenerate(consent: .enabled, enabled: true))
     precondition(!MeetingSummaryPreferences.shouldGenerate(consent: .enabled, enabled: false))
 
-    let aliases = MeetingSummaryPreferences.normalizedAliases(from: " Jay \nＪＡＹ\n\n小田\n小田\n" + (0..<20).map { "Name\($0)" }.joined(separator: "\n"))
+    let aliases = MeetingSummaryPreferences.normalizedAliases(from: " Ken \nＫＥＮ\n\n小田\n小田\n" + (0..<20).map { "Name\($0)" }.joined(separator: "\n"))
     precondition(aliases.count == 10, "At most ten aliases are sent")
-    precondition(aliases.prefix(2) == ["Jay", "小田"], "Blank and normalized duplicate aliases are removed")
+    precondition(aliases.prefix(2) == ["Ken", "小田"], "Blank and normalized duplicate aliases are removed")
 }
 
 private func testResponseRejectsUnknownEvidenceAndUnmentionedAlias() throws {
-    let segment = SummarySourceSegment(id: "chunk-1", startSeconds: 185, text: "Jay, please send the Japanese slides by Friday.")
+    let segment = SummarySourceSegment(id: "chunk-1", startSeconds: 185, text: "Ken, please send the Japanese slides by Friday.")
     let request = SummarizeRequest(
         requestID: "request-1",
         previous: nil,
         previousSourceIDs: [],
         segments: [segment],
         targetLanguage: "Simplified Chinese",
-        aliases: ["Jay"],
+        aliases: ["Ken"],
         final: false,
         schemaVersion: 1,
         promptVersion: "2026-08-31-v1"
@@ -109,7 +109,7 @@ private func testResponseRejectsUnknownEvidenceAndUnmentionedAlias() throws {
         previousSourceIDs: [],
         segments: [SummarySourceSegment(id: "chunk-2", startSeconds: 200, text: "Please send the slides by Friday.")],
         targetLanguage: "Simplified Chinese",
-        aliases: ["Jay"],
+        aliases: ["Ken"],
         final: false,
         schemaVersion: 1,
         promptVersion: "2026-08-31-v1"

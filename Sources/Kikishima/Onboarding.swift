@@ -17,7 +17,7 @@ final class OnboardingController: NSObject, NSWindowDelegate {
         if window == nil {
             let w = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 540, height: 460),
-                styleMask: [.titled, .closable, .fullSizeContentView],
+                styleMask: [.titled, .closable],
                 backing: .buffered, defer: false)
             w.title = tr("欢迎使用 Kikishima")
             w.titlebarAppearsTransparent = true
@@ -56,6 +56,7 @@ struct OnboardingView: View {
     var body: some View {
         VStack(spacing: 0) {
             GeometryReader { geometry in
+                // Keep the system key loop open to the page controls, not just the footer.
                 ScrollView {
                     Group {
                         switch page {
@@ -67,30 +68,34 @@ struct OnboardingView: View {
                         default: ready
                         }
                     }
+                    .kkKeyboardPage("onboarding-\(page)")
                     .frame(maxWidth: .infinity, minHeight: geometry.size.height)
                 }
                 .id(page)
             }
+            .clipped()
 
             HStack {
-                if page > 0 { Button(tr("上一步")) { page -= 1 } }
+                if page > 0 { Button(tr("上一步")) { page -= 1 }.accessibilityIdentifier("kk-onboarding-previous") }
                 Spacer()
-                Text("\(page + 1) / \(total)").font(.caption).foregroundStyle(.tertiary)
+                Text("\(page + 1) / \(total)").font(.caption).foregroundStyle(KKColor.textTertiary)
                 Spacer()
                 if page < total - 1 {
                     if page == signInPage && state.sessionToken.isEmpty {
-                        Button(tr("以后再说")) { page += 1 }.buttonStyle(.bordered)   // 跳过不能是全页最显眼的按钮
+                        Button(tr("以后再说")) { page += 1 }.accessibilityIdentifier("kk-onboarding-skip").buttonStyle(.bordered)   // 跳过不能是全页最显眼的按钮
                     } else {
-                        Button(tr("下一步")) { page += 1 }.buttonStyle(.borderedProminent)
+                        Button(tr("下一步")) { page += 1 }.accessibilityIdentifier("kk-onboarding-next").kkPrimaryButton()
                     }
                 } else {
-                    Button(tr("完成")) { finish(true) }
-                        .buttonStyle(.borderedProminent)
+                    Button(tr("完成")) { finish(true) }.accessibilityIdentifier("kk-onboarding-finish")
+                        .kkPrimaryButton()
                 }
             }
             .padding(.horizontal, 24).padding(.vertical, 14)
-            .background(Color.primary.opacity(0.03))
+            .background(KKColor.textPrimary.opacity(0.03))
         }
+        .buttonStyle(KKQuietButtonStyle())
+        .kkNeutralControls()
     }
 
     private var welcome: some View {
@@ -102,17 +107,17 @@ struct OnboardingView: View {
             Text(tr("登录")).font(.title2.bold())
             if !state.sessionToken.isEmpty {
                 Label(tr("已登录：%@", state.accountEmail.isEmpty ? tr("账号") : state.accountEmail), systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(KKColor.textSecondary)
                 Text(state.plan == "pro" ? tr("Pro 档") : tr("免费版：每周 60 分钟翻译字幕，付费后同一邮箱自动升级 Pro。"))
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.callout).foregroundStyle(KKColor.textSecondary)
             } else if state.codeSent {
-                Text(tr("验证码已发到 %@，10 分钟内有效。", state.accountEmail)).font(.callout).foregroundStyle(.secondary)
+                Text(tr("验证码已发到 %@，10 分钟内有效。", state.accountEmail)).font(.callout).foregroundStyle(KKColor.textSecondary)
                 HStack {
-                    TextField(tr("6 位验证码"), text: $code)
+                    TextField(tr("6 位验证码"), text: $code).kkFocusRing()
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { state.verifyEmailCode(code: code) }
                     Button(state.activating ? tr("验证中…") : tr("登录")) { state.verifyEmailCode(code: code) }
-                        .buttonStyle(.borderedProminent)
+                        .kkPrimaryButton()
                         .disabled(code.filter(\.isNumber).count != 6 || state.activating)
                 }
                 HStack {
@@ -120,10 +125,10 @@ struct OnboardingView: View {
                     Button(tr("重新发送")) { state.requestEmailCode(email: state.accountEmail) }.disabled(state.activating)
                 }.font(.caption)
             } else {
-                Text(tr("免费版每周 60 分钟，登录即用，不需要信用卡。")).font(.callout).foregroundStyle(.secondary)
-                let hasSocial = GoogleSignIn.isConfigured || state.canSignInWithApple
+                Text(tr("免费版每周 60 分钟，登录即用，不需要信用卡。")).font(.callout).foregroundStyle(KKColor.textSecondary)
+                let hasSocial = state.serverProviders.google || state.canSignInWithApple
                 VStack(spacing: 8) {
-                    if GoogleSignIn.isConfigured {
+                    if state.serverProviders.google {
                         SignInTile(title: tr("使用 Google 登录"), icon: "globe") { state.signInWithGoogle() }
                             .disabled(state.activating)
                     }
@@ -138,12 +143,12 @@ struct OnboardingView: View {
                 }
                 if showEmailSignIn || !hasSocial {
                     HStack {
-                        TextField(tr("邮箱"), text: $email)
+                        TextField(tr("邮箱"), text: $email).kkFocusRing()
                             .textFieldStyle(.roundedBorder)
                             .textContentType(.emailAddress)
                             .onSubmit { state.requestEmailCode(email: email) }
                         Button(state.activating ? tr("发送中…") : tr("发送验证码")) { state.requestEmailCode(email: email) }
-                            .buttonStyle(.borderedProminent)
+                            .kkPrimaryButton()
                             .disabled(!email.contains("@") || state.activating)
                     }
                 }
@@ -152,34 +157,41 @@ struct OnboardingView: View {
                 }
             }
             if !state.activationError.isEmpty {
-                Text(state.activationError).font(.caption).foregroundStyle(.red)
+                Text(state.activationError).font(.caption).foregroundStyle(KKColor.error)
             }
         }
         .padding(30)
     }
 
+    private var readyPreviewSource: String {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return ShootSimulation.previewSource }
+#endif
+        return "Let's review the next steps together."
+    }
+
     private var ready: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(tr("可以开会了")).font(.title2.bold())
-            HomeCaptionPreview(source: "Let's review the next steps together.",
+            HomeCaptionPreview(source: readyPreviewSource,
                 translation: HomeCaptionPreview.sampleTranslation(for: state.targetLang), status: "",
                 compact: true, display: state.captionDisplay,
                 desktop: state.captionSurface == "window", isExample: true)
             Text(.init(tr("开会时：菜单栏点图标 → 开始字幕，或者 **%@**。字幕窗会浮在会议窗口上面，全屏也能看到。", GlobalHotkey.displayText)))
                 .font(.callout)
             Text(tr("会议是日语或其他语言？在「打开 Kikishima」里改会议语言。人名、产品名总被翻错？把它们加进术语表。"))
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(KKColor.textSecondary)
             Button {
                 finish(false)
                 state.toggle()
             } label: {
                 Label(tr("现在就试一下（开始字幕）"), systemImage: "play.fill")
             }
-            .buttonStyle(.borderedProminent)
+            .kkPrimaryButton()
             .disabled(state.sessionToken.isEmpty)
             if state.sessionToken.isEmpty {
                 HStack(spacing: 8) {
-                    Text(tr("还没登录，登录后才能开始翻译。")).font(.caption).foregroundStyle(.orange)
+                    Text(tr("还没登录，登录后才能开始翻译。")).font(.caption).foregroundStyle(KKColor.warning)
                     Button(tr("去登录")) { page = signInPage }.font(.caption)
                 }
             }
@@ -191,10 +203,11 @@ struct OnboardingView: View {
 
 // MARK: - 权限页（参考 Screenflare：一页列清楚，每项一个「允许」，必需/可选打标，状态实时更新）
 
-enum PermissionStatus { case unknown, prompted, granted, denied, needsSettings }
+enum PermissionStatus { case unknown, prompted, granted, denied, needsSettings, unconfirmed }
 
 struct PermissionsPage: View {
     @Bindable var state: CaptionState
+    @State private var audioProbeInFlight = false
     @State private var audio: PermissionStatus = .unknown
     @State private var speech: PermissionStatus = .unknown
     @State private var input: PermissionStatus = .unknown
@@ -204,22 +217,15 @@ struct PermissionsPage: View {
 
     /// 系统音频：起一次 tap 探测（首次会触发系统授权框）。done 在结果落定后调用
     private func requestAudio(done: (() -> Void)? = nil) {
+        guard !audioProbeInFlight else { return }
+        audioProbeInFlight = true
         busyItem = "audio"
+        audio = .prompted
         Task {
-            let ok = await state.probeAudioPermission()
-            let attemptedBefore = UserDefaults.standard.bool(forKey: "audioProbeAttempted")
-            UserDefaults.standard.set(true, forKey: "audioProbeAttempted")
-            if ok {
-                audio = .granted
-                UserDefaults.standard.set(true, forKey: "audioPermissionGranted")
-                if hintFor == "audio" { PermissionDropHelper.shared.hide(); hintFor = nil }
-            } else if attemptedBefore {
-                audio = .needsSettings          // 已经问过一次还不行 = 被拒过：去系统设置
-                openSettings("Privacy_AudioCapture", item: "audio")
-            } else {
-                audio = .prompted               // 第一次失败 = 系统刚弹了授权框，让用户去点它，回来再探
-            }
-            busyItem = nil
+            let evidence = await SystemAudioTap.probePermission()
+            applyAudioEvidence(evidence)
+            audioProbeInFlight = false
+            if busyItem == "audio" { busyItem = nil }
             done?()
         }
     }
@@ -239,13 +245,17 @@ struct PermissionsPage: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(tr("几项权限")).font(.title2.bold())
             Text(tr("macOS 会在 app 听声音之前先问一次。Kikishima 只在字幕运行时使用它们，音频不会离开你的 Mac。"))
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(KKColor.textSecondary)
 
-            PermissionRow(icon: "speaker.wave.2.circle.fill", title: tr("系统音频录制"), required: true,
-                          why: tr("听到会议里对方的声音。这是唯一途径。"), status: audio, busy: busyItem == "audio") { requestAudio() }
-            PermissionRow(icon: "waveform.circle.fill", title: tr("语音识别"), required: true,
+            PermissionRow(id: "system-audio", icon: "speaker.wave.2.circle.fill", title: tr("系统音频录制"), required: true,
+                          why: tr("听到会议里对方的声音。这是唯一途径。"), status: audio, busy: busyItem == "audio") {
+                if audio == .needsSettings || audio == .unconfirmed {
+                    openSettings("Privacy_AudioCapture", item: "audio")
+                } else { requestAudio() }
+            }
+            PermissionRow(id: "speech", icon: "waveform.circle.fill", title: tr("语音识别"), required: true,
                           why: tr("把声音转成文字，全程在本机完成。"), status: speech, busy: busyItem == "speech") { requestSpeech() }
-            PermissionRow(icon: "command.circle.fill", title: tr("输入监控"), required: false,
+            PermissionRow(id: "input-monitoring", icon: "command.circle.fill", title: tr("输入监控"), required: false,
                           why: tr("识别「双击左 ⌘」这个快捷键。不给的话用 %@。", GlobalHotkey.comboDisplay), status: input, busy: busyItem == "input") {
                 let wasDenied = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeDenied
                 _ = GlobalHotkey.requestInputMonitoring()   // 已拒绝时会直接打开系统设置
@@ -254,27 +264,30 @@ struct PermissionsPage: View {
             }
 
             if audio != .granted || speech != .granted {
-                Text(tr("两项必需权限还没都允许：现在不给也行，开始字幕时系统会再问一次。")).font(.caption).foregroundStyle(.orange)
+                Text(tr("两项必需权限还没都允许：现在不给也行，开始字幕时系统会再问一次。")).font(.caption).foregroundStyle(KKColor.warning)
             }
-            Text(tr("之后随时可以在 系统设置 › 隐私与安全性 里更改。")).font(.caption).foregroundStyle(.tertiary)
+            Text(tr("之后随时可以在 系统设置 › 隐私与安全性 里更改。")).font(.caption).foregroundStyle(KKColor.textTertiary)
         }
         .padding(30)
         .onAppear {
-            if UserDefaults.standard.bool(forKey: "audioPermissionGranted") { audio = .granted }   // 系统音频没有只读查询接口：记住上次探测成功
-            refresh()
-            // 进入页面即申请权限：先系统音频，落定后再语音识别，避免两个系统框叠在一起
+#if DEBUG
+            if R11TestEnvironment.active { return } // Tab-test the real rows without prompting.
+#endif
+            refresh(probeAudio: false)
             if !autoAsked {
                 autoAsked = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    let askSpeech = { if speech == .unknown { requestSpeech() } }
-                    if audio != .granted { requestAudio(done: askSpeech) } else { askSpeech() }
-                }
+                requestAudio(done: { if speech == .unknown && busyItem != "speech" { requestSpeech() } })
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }   // 从系统设置回来即刷新
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+#if DEBUG
+            if R11TestEnvironment.active { return }
+#endif
+            refresh()
+        }   // 从系统设置回来即刷新
     }
 
-    private func refresh() {
+    private func refresh(probeAudio: Bool = true) {
         speech = {
             switch SFSpeechRecognizer.authorizationStatus() {
             case .authorized: return .granted
@@ -287,13 +300,27 @@ struct PermissionsPage: View {
         if input == .granted { GlobalHotkey.reinstall() }
         if (hintFor == "input" && input == .granted) || (hintFor == "speech" && speech == .granted) { PermissionDropHelper.shared.hide(); hintFor = nil }
         // 刚让用户去点系统弹窗：回来静默再探一次（已授权时不会再弹）
-        if audio == .prompted, busyItem == nil {
+        if probeAudio && !audioProbeInFlight && busyItem == nil {
+            audioProbeInFlight = true
             busyItem = "audio"
             Task {
-                let ok = await state.probeAudioPermission()
-                if ok { audio = .granted; UserDefaults.standard.set(true, forKey: "audioPermissionGranted") } else { audio = .needsSettings }
-                busyItem = nil
+                let evidence = await SystemAudioTap.probePermission()
+                applyAudioEvidence(evidence)
+                audioProbeInFlight = false
+                if busyItem == "audio" { busyItem = nil }
             }
+        }
+    }
+
+    private func applyAudioEvidence(_ evidence: SystemAudioTap.PermissionEvidence) {
+        switch evidence {
+        case .verified: audio = .granted
+        case .unconfirmed: audio = .unconfirmed
+        case .failed: audio = .needsSettings
+        }
+        if audio == .granted, hintFor == "audio" {
+            PermissionDropHelper.shared.hide()
+            hintFor = nil
         }
     }
 
@@ -314,6 +341,7 @@ struct PermissionsPage: View {
 }
 
 struct PermissionRow: View {
+    var id: String
     var icon: String
     var title: String
     var required: Bool
@@ -325,6 +353,7 @@ struct PermissionRow: View {
     private var statusText: String {
         switch status {
         case .granted: return tr("已允许")
+        case .unconfirmed: return tr("尚未确认系统音频权限，请在系统设置里检查；播放声音后回来重试。")
         case .needsSettings: return tr("被拒绝过：请在系统设置里打开，回来会自动刷新。")
         case .prompted: return tr("请在弹出的系统对话框里允许，回来会自动刷新。")
         case .denied: return tr("被拒绝")
@@ -334,36 +363,38 @@ struct PermissionRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: icon).font(.title2).foregroundStyle(.blue).frame(width: 28)
+            Image(systemName: icon).font(.title2).foregroundStyle(KKColor.textSecondary).frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(title).font(.headline)
                     Text(required ? tr("必需") : tr("可选"))
                         .font(.caption2).padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Capsule().fill(required ? Color.red.opacity(0.15) : Color.gray.opacity(0.15)))
-                        .foregroundStyle(required ? .red : .secondary)
+                        .background(Capsule().fill(required ? KKColor.error.opacity(0.15) : KKColor.textTertiary.opacity(0.15)))
+                        .foregroundStyle(required ? KKColor.error : KKColor.textSecondary)
                 }
                 Text(statusText)
-                    .font(.caption).foregroundStyle(status == .needsSettings || status == .prompted ? .orange : .secondary)
+                    .font(.caption).foregroundStyle(status == .needsSettings || status == .prompted ? KKColor.warning : KKColor.textSecondary)
             }
             Spacer()
             switch status {
             case .granted:
-                Label(tr("已允许"), systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.callout)
-            case .needsSettings, .denied:
+                Label(tr("已允许"), systemImage: "checkmark.circle.fill").foregroundStyle(KKColor.textSecondary).font(.callout)
+            case .needsSettings, .denied, .unconfirmed:
                 Button(tr("打开系统设置")) { action() }.controlSize(.small)
+                    .accessibilityIdentifier("kk-permission-action-" + id)
             case .prompted:
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
-                    Text(tr("未允许")).font(.caption).foregroundStyle(.orange)
+                    Text(tr("未允许")).font(.caption).foregroundStyle(KKColor.warning)
                 }
             case .unknown:
-                Button(tr("允许")) { action() }.buttonStyle(.borderedProminent).controlSize(.small).disabled(busy)
+                Button(tr("允许")) { action() }.buttonStyle(KKQuietButtonStyle()).controlSize(.small).disabled(busy)
+                    .accessibilityIdentifier("kk-permission-action-" + id)
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-        .accessibilityElement(children: .combine)
+        .background(RoundedRectangle(cornerRadius: 10).fill(KKColor.surfaceRaised))
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("\(title)：\(statusText)")
     }
 }
@@ -405,7 +436,7 @@ struct LanguagePage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(tr("你最熟悉的语言是哪一个？")).font(.title2.bold())
-            Text(tr("界面和字幕译文都会用这个语言。之后随时能改。")).font(.callout).foregroundStyle(.secondary)
+            Text(tr("界面和字幕译文都会用这个语言。之后随时能改。")).font(.callout).foregroundStyle(KKColor.textSecondary)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
                 ForEach(UILang.all) { l in
                     LanguageChoiceTile(title: l.native, selected: state.uiLanguage == l.code) {
@@ -414,7 +445,7 @@ struct LanguagePage: View {
                     }
                 }
             }
-            Text(tr("界面和译文会立即切换。")).font(.caption).foregroundStyle(.tertiary)
+            Text(tr("界面和译文会立即切换。")).font(.caption).foregroundStyle(KKColor.textTertiary)
         }
         .padding(30)
         .onAppear {
@@ -436,54 +467,65 @@ struct MeetingLanguagesPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(tr("开会时通常会听到哪些语言？")).font(.title2.bold())
-            Text(tr("可以多选。选好后会在后台下载对应的离线转写模型（每个几百 MB，只下一次）。")).font(.callout).foregroundStyle(.secondary)
-            let shown = showAll ? all.map(\.identifier) : common.filter { c in all.isEmpty || all.contains { $0.identifier == c } }
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
-                    ForEach(shown, id: \.self) { id in
-                        let on = state.meetingLocales.contains(id)
-                        Button {
-                            if on { state.meetingLocales.removeAll { $0 == id } }
-                            else { state.meetingLocales.append(id); state.predownloadModels([id]) }
-                            if let first = state.meetingLocales.first { state.localeID = first }
-                        } label: {
-                            HStack {
-                                Image(systemName: on ? "checkmark.circle.fill" : "circle").foregroundStyle(on ? Color.accentColor : Color.secondary)
-                                Text(localeName(id)).lineLimit(1)
-                                Spacer()
-                                if let p = state.modelProgress[id] {
-                                    if p >= 1 { Image(systemName: "arrow.down.circle.fill").foregroundStyle(.green).font(.caption) }
-                                    else { ProgressView(value: p).frame(width: 40) }
-                                }
+            Text(tr("可以多选。选好后会在后台下载对应的离线转写模型（每个几百 MB，只下一次）。")).font(.callout).foregroundStyle(KKColor.textSecondary)
+            let commonShown = common.filter { c in all.isEmpty || all.contains { $0.identifier == c } }
+            let shown = showAll ? all.map(\.identifier) : commonShown + state.meetingLocales.filter { !commonShown.contains($0) }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
+                ForEach(shown, id: \.self) { id in
+                    let on = state.meetingLocales.contains(id)
+                    Button {
+                        if on { state.meetingLocales.removeAll { $0 == id } }
+                        else { state.meetingLocales.append(id); state.predownloadModels([id]) }
+                        if let first = state.meetingLocales.first { state.localeID = first }
+                    } label: {
+                        HStack {
+                            Image(systemName: on ? "checkmark.circle.fill" : "circle").foregroundStyle(on ? KKColor.textPrimary : KKColor.textSecondary)
+                            Text(localeName(id)).lineLimit(1)
+                            Spacer()
+                            if state.modelReady(id) {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(KKColor.textSecondary).font(.caption)
+                                    .accessibilityLabel(tr("模型已安装"))
+                            } else {
+                                Text(tr("需下载")).font(.caption).foregroundStyle(KKColor.textSecondary)
                             }
-                            .padding(.horizontal, 8).frame(minHeight: 34)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(on ? Color.accentColor : Color.secondary)
-                        .accessibilityAddTraits(on ? [.isSelected] : [])
-                        .help(localeName(id))
+                        .padding(.horizontal, 8).frame(minHeight: 34)
+                        .foregroundStyle(KKColor.textPrimary)
+                        .background(on ? KKColor.surfaceSelected : KKColor.surfaceRaised,
+                                    in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(KKColor.textPrimary.opacity(on ? 1 : 0), lineWidth: 1))
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
                     }
+                    .buttonStyle(KKPlainButtonStyle(radius: 8))
+                    .accessibilityLabel(localeName(id))
+                    .accessibilityIdentifier("kk-meeting-language-" + id)
+                    .accessibilityAddTraits(on ? [.isSelected] : [])
+                    .help(localeName(id))
                 }
             }
-            .frame(height: 210)
             HStack {
                 if !all.isEmpty {
                     Button(showAll ? tr("只看常用") : tr("显示全部 %@ 种", all.count)) { showAll.toggle() }.font(.caption)
                 }
                 Spacer()
                 if let first = state.meetingLocales.first {
-                    Text(tr("默认会议语言：%@", localeName(first))).font(.caption).foregroundStyle(.secondary)
+                    Text(tr("默认会议语言：%@", localeName(first))).font(.caption).foregroundStyle(KKColor.textSecondary)
                 }
             }
-            HStack {
-                Toggle(tr("选了就下载模型（建议在 Wi-Fi 下）"), isOn: $state.autoDownloadModels).controlSize(.small)
-                Spacer()
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(tr("选了就下载模型（建议在 Wi-Fi 下）"), isOn: $state.autoDownloadModels).toggleStyle(KKSwitchToggleStyle()).controlSize(.small)
+                    .accessibilityLabel(tr("选了就下载模型（建议在 Wi-Fi 下）"))
+                    .accessibilityIdentifier("kk-onboarding-download-models")
                 Text(state.autoDownloadModels ? tr("已选 %@ 种，每种几百 MB，只下一次。", state.meetingLocales.count) : tr("稍后下载：开始字幕时再按需下载当前会议语言的模型。"))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(KKColor.textSecondary)
             }
         }
         .padding(30)
+        .padding(.bottom, 16)
+        .fixedSize(horizontal: false, vertical: true)
         .task {
+            await state.refreshModelInstallation()
             all = await SpeechTranscriber.supportedLocales.sorted { ($0.identifier) < ($1.identifier) }
             if state.meetingLocales.isEmpty {
                 // 默认：英语 + 母语对应的会议语言（母语不是英语时）

@@ -1,5 +1,7 @@
 #!/bin/bash
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/test_guard.sh"
+kk_test_init "${BASH_SOURCE[0]}"
 cd "$(dirname "$0")/.."
 
 fail=0
@@ -7,8 +9,8 @@ fail=0
 check_absent() {
   local pattern="$1"
   local file="$2"
-  if rg -n "$pattern" "$file" >/tmp/kikishima-core-scope-hit.txt; then
-    cat /tmp/kikishima-core-scope-hit.txt
+  if rg -n "$pattern" "$file" >"$KK_TEST_TMP_ROOT/kikishima-core-scope-hit.txt"; then
+    cat "$KK_TEST_TMP_ROOT/kikishima-core-scope-hit.txt"
     fail=1
   fi
 }

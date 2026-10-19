@@ -16,6 +16,27 @@ enum TranscriptEvent {
 
 @MainActor
 final class TranscribeEngine {
+    static func modelLocaleKey(_ identifier: String) -> String {
+        identifier.replacingOccurrences(of: "-", with: "_").lowercased()
+    }
+
+    static func installedModelLocales() async -> Set<String> {
+        let locales = await SpeechTranscriber.installedLocales
+        return Set(locales.map { modelLocaleKey($0.identifier) })
+    }
+
+    /// Releases this app's locale reservation; macOS decides when assets can be reclaimed.
+    /// Bool failure is logged, never propagated to the language-list deletion.
+    static func releaseModelLocale(_ identifier: String) async -> Bool {
+        guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: identifier)) else {
+            logger.warning("Cannot resolve speech locale for release: \(identifier, privacy: .public)")
+            return false
+        }
+        let released = await AssetInventory.release(reservedLocale: locale)
+        if !released { logger.warning("Speech locale reservation release failed: \(identifier, privacy: .public)") }
+        return released
+    }
+
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
     // 音频 IO 线程（feed）与主线程（start/stop）同时碰的三个字段：锁保护；nonisolated(unsafe) 让 feed 能从非隔离上下文访问
@@ -26,12 +47,14 @@ final class TranscribeEngine {
     private var resultsTask: Task<Void, Never>?
     /// 模型下载进度（0~1），无需下载时为 nil
     var onDownloadProgress: ((Double) -> Void)?
+    private var downloadingModelLocale: String?
 
     /// locale: "en_US" / "ja_JP"
     /// 代数：每次 start/stop +1；await 之后发现代数变了 = 已被别的 start/stop 接管，只拆自己建的东西
     private var gen = 0
+    private var draining = false
 
-    func start(localeID: String, onEvent: @escaping @Sendable (TranscriptEvent) -> Void) async throws {
+    func start(localeID: String, onEvent: @escaping @MainActor @Sendable (TranscriptEvent) -> Void) async throws {
         stop()   // 幂等：上一次没停干净就先清
         gen += 1
         let myGen = gen
@@ -46,14 +69,32 @@ final class TranscribeEngine {
 
         // 模型资产：没装则下载（首次要几百 MB，之后秒开）
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+            try Task.checkCancellation()
+            guard gen == myGen else { throw CancellationError() }
+            downloadingModelLocale = localeID
+            CaptionState.shared.modelProgress[localeID] = 0
             let progress = request.progress
             let observer = progress.observe(\.fractionCompleted, options: [.new]) { [weak self] p, _ in
                 let v = p.fractionCompleted
-                Task { @MainActor in self?.onDownloadProgress?(v) }
+                Task { @MainActor in
+                    guard let self, self.gen == myGen else { return }
+                    let state = CaptionState.shared
+                    if state.modelProgress[localeID] != nil {
+                        state.modelProgress[localeID] = min(0.99, v)
+                    }
+                    self.onDownloadProgress?(v)
+                }
             }
-            defer { observer.invalidate() }
+            defer {
+                observer.invalidate()
+                if gen == myGen {
+                    CaptionState.shared.modelProgress[localeID] = nil
+                    downloadingModelLocale = nil
+                }
+            }
             try await request.downloadAndInstall()
         }
+        await CaptionState.shared.refreshModelInstallation()
         try Task.checkCancellation()   // 用户在下载期间取消：什么都还没建，直接退出
         guard gen == myGen else { throw CancellationError() }
 
@@ -77,7 +118,8 @@ final class TranscribeEngine {
         resultsTask = Task {
             do {
                 for try await result in transcriber.results {
-                    guard self.gen == myGen, !Task.isCancelled else { return }
+                    guard TranscriptionResultPolicy.accepts(resultGeneration: myGen, currentGeneration: self.gen,
+                                                           draining: self.draining, finished: Task.isCancelled) else { return }
                     let text = String(result.text.characters)
                     if result.isFinal {
                         onEvent(.finalized(text))
@@ -122,7 +164,33 @@ final class TranscribeEngine {
         }
     }
 
+    /// End input, accept finalize results, and wait until their consumer has delivered them.
+    func finish() async {
+        let myGen = gen
+        draining = true
+        let builder = lock.withLock {
+            let builder = inputBuilder
+            inputBuilder = nil; converter = nil; analyzerFormat = nil
+            return builder
+        }
+        builder?.finish()
+        let analyzer = self.analyzer
+        let task = resultsTask
+        do { try await analyzer?.finalizeAndFinishThroughEndOfInput() }
+        catch { task?.cancel() }
+        await task?.value
+        guard gen == myGen else { return }
+        gen += 1
+        draining = false
+        resultsTask = nil; self.analyzer = nil; self.transcriber = nil
+    }
+
     func stop() {
+        if let locale = downloadingModelLocale {
+            CaptionState.shared.modelProgress[locale] = nil
+            downloadingModelLocale = nil
+        }
+        draining = false
         gen += 1
         lock.lock()
         let builder = inputBuilder

@@ -87,6 +87,37 @@ final class SystemAudioTap {
     private let watchesDevice: Bool
     init(watchesDevice: Bool = true) { self.watchesDevice = watchesDevice }
 
+    /// Core Audio can return noErr even when TCC supplies only silence. A successful
+    /// start alone is not authorization evidence. Never consult the cached grant.
+    enum PermissionEvidence { case verified, unconfirmed, failed }
+
+    static func probePermission() async -> PermissionEvidence {
+        await Task.detached(priority: .userInitiated) { probePermissionBlocking() }.value
+    }
+
+    private static func probePermissionBlocking() -> PermissionEvidence {
+        let probe = SystemAudioTap(watchesDevice: false)
+        let signal = DispatchSemaphore(value: 0)
+        defer { probe.stop() }
+        do {
+            try probe.start { _, data, _, _, _ in
+                for buffer in UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: data)) {
+                    guard let bytes = buffer.mData else { continue }
+                    let samples = bytes.assumingMemoryBound(to: Float.self)
+                    for index in 0..<(Int(buffer.mDataByteSize) / MemoryLayout<Float>.size) {
+                        if samples[index].isFinite && abs(samples[index]) > 0.000001 {
+                            signal.signal()
+                            return
+                        }
+                    }
+                }
+            }
+            return signal.wait(timeout: .now() + 2) == .success ? .verified : .unconfirmed
+        } catch {
+            return .failed
+        }
+    }
+
     func start(ioBlock: @escaping AudioDeviceIOBlock) throws {
         guard !aggregateID.isValid, !tapID.isValid else { return }   // 防重入
         let desc = CATapDescription(stereoGlobalTapButExcludeProcesses: [])

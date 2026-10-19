@@ -1,10 +1,19 @@
 # -*- coding: utf-8 -*-
 # 生成 zh-Hant / ja / en / ko 四张表。key = 简体中文源串。跑：python3 Resources/l10n/gen.py
+import sys
+from pathlib import Path
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools/lib'))
+from test_guard import require_free_space, install_exit_signals
+require_free_space(__file__)
+install_exit_signals()
 import json, os
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 每条：简中 key → [繁中, 日, 英, 韩]
 T = {
+"记录列表": ["記錄列表", "記録リスト", "Record list", "기록 목록"],
+"双语": ["雙語", "二言語", "Bilingual", "이중 언어"],
 "仅桌面紧凑字幕生效，开启后无法点击工具条或拖动窗口。可在这里关闭；停止字幕也可用菜单栏或快捷键。": ["僅桌面緊湊字幕生效，開啟後無法點擊工具列或拖動視窗。可在這裡關閉；停止字幕也可用選單列或快捷鍵。", "デスクトップのコンパクト字幕のみ対象です。有効時はツールバー操作やウインドウ移動ができません。ここで解除できます。字幕の停止にはメニューバーやショートカットも使えます。", "Applies only to compact desktop captions. While enabled, the toolbar and window dragging are unavailable. Turn it off here; use the menu bar or shortcut to stop captions.", "데스크탑 간결한 자막에만 적용됩니다. 켜면 도구 모음 클릭과 창 이동이 불가능합니다. 여기서 끌 수 있으며, 메뉴 막대나 단축키로 자막을 중지할 수 있습니다."],
 "已展开": ["已展開", "展開済み", "Expanded", "펼쳐짐"],
 "已收起": ["已收起", "折りたたみ済み", "Collapsed", "접힘"],
@@ -53,7 +62,6 @@ T = {
 "%@ 分钟": ["%@ 分鐘", "%@ 分", "%@ min", "%@분"],
 "1. 开会前在「语言」里选好会议语言和译文语言。": ["1. 開會前在「語言」裡選好會議語言和譯文語言。", "1. 会議の前に「言語」で会議の言語と字幕の言語を選びます。", "1. Before the meeting, pick the meeting language and caption language under Languages.", "1. 회의 전에 「언어」에서 회의 언어와 자막 언어를 선택하세요."],
 "2. 会议开始后，菜单栏点图标 → 开始字幕，或按 %@。": ["2. 會議開始後，點選單列圖示 → 開始字幕，或按 %@。", "2. 会議が始まったらメニューバーのアイコン → 字幕を開始、または %@。", "2. When the meeting starts, click the menu bar icon → Start captions, or press %@.", "2. 회의가 시작되면 메뉴 막대 아이콘 → 자막 시작, 또는 %@."],
-"3. 字幕窗浮在会议窗口上；会议模式贴屏幕顶部，视频模式贴底部。": ["3. 字幕視窗浮在會議視窗上；會議模式貼螢幕頂部，影片模式貼底部。", "3. 字幕ウインドウは会議画面の上に浮きます。会議モードは画面上部、動画モードは下部に表示。", "3. The caption window floats above the meeting. Meeting mode sits at the top of the screen, video mode at the bottom.", "3. 자막 창은 회의 창 위에 떠 있습니다. 회의 모드는 화면 상단, 동영상 모드는 하단."],
 "4. 停止时记录自动保存到「文稿 › Kikishima」。": ["4. 停止時記錄自動儲存到「文件 › Kikishima」。", "4. 停止すると記録が「書類 › Kikishima」に自動保存されます。", "4. When you stop, the transcript is saved to Documents › Kikishima.", "4. 중지하면 기록이 「문서 › Kikishima」에 자동 저장됩니다."],
 "6 位验证码": ["6 位驗證碼", "6桁のコード", "6-digit code", "6자리 코드"],
 "Pro 档": ["Pro 方案", "Pro プラン", "Pro plan", "Pro 플랜"],
@@ -157,7 +165,6 @@ T = {
 "服务器地址": ["伺服器位址", "サーバーアドレス", "Server URL", "서버 주소"],
 "未登录": ["未登入", "未ログイン", "Not signed in", "로그인 안 됨"],
 "未登录 · 点「进入 Kikishima」登录": ["未登入 · 點「進入 Kikishima」登入", "未ログイン · 「Kikishimaを開く」からログイン", "Not signed in · Open Kikishima to sign in", "로그인 안 됨 · 「Kikishima 열기」에서 로그인"],
-"本月已用约 %@ 分钟": ["本月已用約 %@ 分鐘", "今月の使用 約 %@ 分", "About %@ min used this month", "이번 달 약 %@분 사용"],
 "档位": ["方案", "プラン", "Plan", "플랜"],
 "欢迎回来": ["歡迎回來", "おかえりなさい", "Welcome back", "다시 만나서 반가워요"],
 "每周 60 分钟。升级 Pro 不限时长。": ["每週 60 分鐘。升級 Pro 不限時長。", "週60分。Proなら時間無制限。", "60 minutes a week. Pro is unlimited.", "주 60분. Pro는 무제한."],
@@ -213,7 +220,7 @@ T = {
 
 # 第二批：状态行 / 横幅 / 错误 / 权限行
 T.update({
-"API key 无效或已吊销 — 打开设置检查": ["API key 無效或已撤銷 — 打開設定檢查", "APIキーが無効か取り消されています。設定を確認してください", "API key invalid or revoked — check Settings", "API 키가 유효하지 않거나 취소됨 — 설정 확인"],
+"API key 无效或已吊销 · 打开设置检查": ["API key 無效或已撤銷 · 打開設定檢查", "APIキーが無効か取り消されています。設定を確認してください", "API key invalid or revoked · check Settings", "API 키가 유효하지 않거나 취소됨 · 설정 확인"],
 "翻译服务暂时故障（%@），稍后自动恢复": ["翻譯服務暫時故障（%@），稍後自動恢復", "翻訳サービスの一時的な障害（%@）。しばらくすると自動で復旧します", "Translation service temporarily unavailable (%@), retrying automatically", "번역 서비스 일시 오류(%@), 잠시 후 자동 복구"],
 "翻译服务繁忙或额度不足，稍后再试": ["翻譯服務繁忙或額度不足，稍後再試", "翻訳サービスが混み合っているか、利用枠が不足しています。後でもう一度お試しください", "Translation service is busy or the allowance is exhausted. Try again later.", "번역 서비스가 혼잡하거나 사용 한도가 부족합니다. 잠시 후 다시 시도하세요."],
 "上一次启动还在收尾，稍等一秒再试": ["上一次啟動還在收尾，稍等一秒再試", "前回の起動処理が終わりかけです。1秒後にもう一度", "Previous start is still finishing, try again in a second", "이전 시작이 마무리 중입니다. 1초 후 다시 시도"],
@@ -246,7 +253,7 @@ T.update({
 "授权已到期，请续费": ["授權已到期，請續費", "ライセンスの期限が切れています。更新してください", "License expired, please renew", "라이선스가 만료되었습니다. 갱신하세요"],
 "授权码无效，检查有没有抄错": ["授權碼無效，檢查有沒有抄錯", "ライセンスキーが無効です。入力を確認してください", "Invalid license key, check for typos", "라이선스 키가 잘못되었습니다. 오타를 확인하세요"],
 "操作太频繁，稍等一下再试": ["操作太頻繁，稍等一下再試", "操作が多すぎます。少し待ってからもう一度", "Too many attempts, wait a moment", "너무 자주 시도했습니다. 잠시 후 다시 시도"],
-"无网络 — 字幕仅转写，恢复联网后自动继续翻译": ["無網路 — 字幕僅轉寫，恢復連線後自動繼續翻譯", "オフライン。字幕は文字起こしのみ、接続が戻ると翻訳を再開", "Offline — transcription only, translation resumes when back online", "오프라인 — 전사만 표시, 온라인 복귀 시 번역 재개"],
+"无网络 · 字幕仅转写，恢复联网后自动继续翻译": ["無網路 · 字幕僅轉寫，恢復連線後自動繼續翻譯", "オフライン。字幕は文字起こしのみ、接続が戻ると翻訳を再開", "Offline · transcription only, translation resumes when back online", "오프라인 · 전사만 표시, 온라인 복귀 시 번역 재개"],
 "服务器没有返回会话": ["伺服器沒有回傳會話", "サーバーからセッションが返りませんでした", "Server returned no session", "서버가 세션을 반환하지 않았습니다"],
 "本周 60 分钟免费额度已用完，下周一重置": ["本週 60 分鐘免費額度已用完，下週一重設", "今週の無料60分を使い切りました。月曜にリセット", "This week's 60 free minutes are used up. Resets Monday", "이번 주 무료 60분을 모두 사용했습니다. 월요일에 초기화"],
 "本地转写 + AI 翻译的会议实时字幕": ["本機轉寫 + AI 翻譯的會議即時字幕", "ローカル音声認識 + AI翻訳の会議字幕", "Live meeting captions: on-device transcription + AI translation", "기기 내 전사 + AI 번역 실시간 회의 자막"],
@@ -353,7 +360,7 @@ T.update({
 "20 秒没听到声音：检查会议是否在播放、输出设备是否正确": ["20 秒沒聽到聲音：檢查會議是否在播放、輸出裝置是否正確", "20秒間音がありません。会議の音が出ているか、出力デバイスが正しいか確認してください", "No sound for 20 s: check the meeting is playing and the output device is right", "20초간 소리가 없습니다. 회의 소리가 나오는지, 출력 장치가 맞는지 확인하세요"],
 })
 
-# ---- 第二轮审计后新增（2026-08-30 深夜）----
+# ---- 第二批新增（2026-08-30）----
 T.update({
 "已登录 · Pro": ["已登入 · Pro", "ログイン済み · Pro", "Signed in · Pro", "로그인됨 · Pro"],
 "失败：%@": ["失敗：%@", "失敗：%@", "Failed: %@", "실패: %@"],
@@ -369,11 +376,10 @@ T.update({
 "创建 IO proc": ["建立 IO proc", "IO procの作成", "Creating the IO proc", "IO proc 생성"],
 "启动聚合设备": ["啟動聚合裝置", "集約デバイスの開始", "Starting the aggregate device", "집계 장치 시작"],
 "本周免费额度已用完，%@ 重置": ["本週免費額度已用完，%@ 重設", "今週の無料枠を使い切りました。%@にリセット", "This week's free minutes are used up. Resets %@", "이번 주 무료 시간을 모두 사용했습니다. %@ 초기화"],
-"本月 Pro 翻译额度已用完，%@ 重置": ["本月 Pro 翻譯額度已用完，%@ 重設", "今月のPro翻訳枠を使い切りました。%@にリセット", "This month's Pro translation quota is used up. Resets %@", "이번 달 Pro 번역 한도를 모두 사용했습니다. %@ 초기화"],
 "下周一": ["下週一", "来週月曜", "next Monday", "다음 주 월요일"],
 "免费版 · 本周剩余不足 1 分钟": ["免費版 · 本週剩餘不足 1 分鐘", "無料プラン · 今週の残りは1分未満", "Free · under 1 min left this week", "무료 플랜 · 이번 주 남은 시간 1분 미만"],
 "字幕运行中 · 本周剩余不足 1 分钟": ["字幕運行中 · 本週剩餘不足 1 分鐘", "字幕を表示中 · 今週の残りは1分未満", "Captions running · under 1 min left this week", "자막 실행 중 · 이번 주 남은 시간 1분 미만"],
-"Pro：$9.99/月 或 $79/年 · 7 天免费试用 · 随时取消": ["Pro：$9.99/月 或 $79/年 · 7 天免費試用 · 隨時取消", "Pro：月額$9.99 または 年額$79 · 7日間無料 · いつでも解約OK", "Pro: $9.99/mo or $79/yr · 7-day free trial · cancel anytime", "Pro: 월 $9.99 또는 연 $79 · 7일 무료 체험 · 언제든 해지"],
+"Pro：$4.99/月 或 $39/年 · 7 天免费试用 · 随时取消": ["Pro：$4.99/月 或 $39/年 · 7 天免費試用 · 隨時取消", "Pro：月額$4.99 または 年額$39 · 7日間無料 · いつでも解約OK", "Pro: $4.99/mo or $39/yr · 7-day free trial · cancel anytime", "Pro: 월 $4.99 또는 연 $39 · 7일 무료 체험 · 언제든 해지"],
 "试用中 · 还剩 %@ 天": ["試用中 · 還剩 %@ 天", "トライアル中 · 残り%@日", "Trial · %@ days left", "체험 중 · %@일 남음"],
 "Pro（试用中）": ["Pro（試用中）", "Pro（トライアル中）", "Pro (trial)", "Pro(체험 중)"],
 "试用到": ["試用到", "トライアル終了日", "Trial ends", "체험 종료"],
@@ -514,11 +520,88 @@ T.update({
 "请前往：系统设置 > 隐私与安全性 > 日历 > Kikishima": ["請前往：系統設定 > 隱私權與安全性 > 行事曆 > Kikishima", "システム設定 > プライバシーとセキュリティ > カレンダー > Kikishima を開いてください", "Go to: System Settings > Privacy & Security > Calendars > Kikishima", "다음으로 이동하세요: 시스템 설정 > 개인정보 보호 및 보안 > 캘린더 > Kikishima"],
 "重新连接": ["重新連接", "再接続", "Reconnect", "다시 연결"],
 "开着就拖不动字幕窗；用菜单里的「重置字幕位置」来摆位。": ["開著就拖不動字幕窗；用選單裡的「重設字幕位置」來擺位。", "オンの間は字幕ウインドウをドラッグできません。メニューの「字幕の位置をリセット」で位置を決めてください。", "While on, the caption window can't be dragged; use Reset Caption Position to place it.", "켜져 있으면 자막 창을 드래그할 수 없습니다. 메뉴의 「자막 위치 재설정」으로 배치하세요."],
-"3. 字幕窗浮在会议窗口上，贴在屏幕顶部。": ["3. 字幕視窗浮在會議視窗上，貼在螢幕頂部。", "3. 字幕ウインドウは会議画面の上に浮き、画面上部に表示されます。", "3. The caption window floats above the meeting and sits at the top of the screen.", "3. 자막 창은 회의 창 위에 떠 있고 화면 상단에 표시됩니다."],
+"3. 字幕默认显示在屏幕顶部的灵动岛，也可在菜单面板切到桌面窗口。": ["3. 字幕預設顯示在螢幕頂部的靈動島，也可在選單面板切到桌面視窗。", "3. 字幕はデフォルトで画面上部のアイランドに表示されます。メニューパネルでデスクトップ ウインドウに切り替えることもできます。", "3. Captions appear in the Island at the top of the screen by default. You can switch to a Desktop window in the menu panel.", "3. 자막은 기본적으로 화면 상단의 아일랜드에 표시됩니다. 메뉴 패널에서 데스크탑 창으로 전환할 수도 있습니다."],
 })
 
 T.update({
 "部分字幕未翻译完成，可重试": ["部分字幕尚未翻譯完成，可重試", "一部の字幕の翻訳が完了していません。再試行できます", "Some captions are not fully translated. You can retry.", "일부 자막의 번역이 완료되지 않았습니다. 다시 시도할 수 있습니다."],
+})
+
+T.update({
+"没听到声音": ["沒聽到聲音", "音声が聞こえません", "No sound detected", "소리가 감지되지 않음"],
+"模型已安装": ["模型已安裝", "モデルはインストール済み", "Model installed", "모델 설치됨"],
+"常用会议语言": ["常用會議語言", "よく使う会議の言語", "Usual meeting languages", "자주 쓰는 회의 언어"],
+})
+
+T.update({
+ "尚未确认系统音频权限，请在系统设置里检查；播放声音后回来重试。": [
+  "尚未確認系統音訊權限，請在系統設定裡檢查；播放聲音後回來重試。",
+  "システム音声の権限を確認できません。システム設定を確認し、音声を再生してから再試行してください。",
+  "System audio access is unconfirmed. Check System Settings, then play audio and return to retry.",
+  "시스템 오디오 권한을 확인하지 못했습니다. 시스템 설정을 확인하고 소리를 재생한 후 다시 시도하세요."
+ ],
+ "还没有会议记录。停止字幕时会自动保存到「%@」。": [
+  "還沒有會議記錄。停止字幕時會自動儲存到「%@」。",
+  "会議の記録はまだありません。字幕を停止すると「%@」に自動保存されます。",
+  "No transcripts yet. When captions stop, they are saved to “%@”.",
+  "아직 회의 기록이 없습니다. 자막을 중지하면 「%@」에 자동 저장됩니다."
+ ],
+ "停止字幕时会自动保存到「%@」。": [
+  "停止字幕時會自動儲存到「%@」。",
+  "字幕を停止すると「%@」に自動保存されます。",
+  "When captions stop, they are saved to “%@”.",
+  "자막을 중지하면 「%@」에 자동 저장됩니다."
+ ],
+ "桌面窗口可拖动、可改大小。": [
+  "桌面視窗可拖曳、可改大小。",
+  "デスクトップ ウインドウはドラッグとサイズ変更ができます。",
+  "The desktop window can be dragged and resized.",
+  "데스크탑 창은 드래그와 크기 조절이 가능합니다."
+ ],
+ "删除 %@": [
+  "刪除 %@",
+  "%@を削除",
+  "Remove %@",
+  "%@ 삭제"
+ ],
+ "下载中 %@%": [
+  "下載中 %@%",
+  "ダウンロード中 %@%",
+  "Downloading %@%",
+  "다운로드 중 %@%"
+ ]
+})
+
+T.update({
+ "切换音频来源，当前 %@": [
+  "切換音訊來源，目前 %@",
+  "音声出力を切り替え、現在 %@",
+  "Switch audio source, currently %@",
+  "오디오 소스 전환, 현재 %@"
+ ],
+ "未知设备": [
+  "未知裝置",
+  "不明なデバイス",
+  "Unknown device",
+  "알 수 없는 기기"
+ ],
+ "已安装": [
+  "已安裝",
+  "インストール済み",
+  "Installed",
+  "설치됨"
+ ],
+ "暂停": [
+  "暫停",
+  "一時停止",
+  "Pause",
+  "일시 정지"
+ ]
+})
+
+T.update({
+ "隐藏边栏": ["隱藏側邊欄", "サイドバーを非表示", "Hide Sidebar", "사이드바 가리기"],
+ "显示边栏": ["顯示側邊欄", "サイドバーを表示", "Show Sidebar", "사이드바 보기"]
 })
 
 langs = ["zh-Hant", "ja", "en", "ko"]

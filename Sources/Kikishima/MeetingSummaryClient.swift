@@ -104,11 +104,16 @@ final class MeetingSummaryClient: MeetingSummaryServicing, @unchecked Sendable {
             code = ""
         }
 
+        if status == 429 {
+            switch HTTPFailurePolicy.classify(status: status, errorCode: code) {
+            case .quotaExceeded: return .quotaExceeded
+            case .rateLimited: return .rateLimited
+            case .temporary: return .server(status)
+            }
+        }
         switch (status, code) {
         case (401, _): return .unauthorized
         case (402, _): return .subscriptionRequired
-        case (429, "rate_limited"): return .rateLimited
-        case (429, _): return .quotaExceeded
         case (503, "free_pool_exhausted"): return .freePoolExhausted
         case (409, "request_in_progress"): return .requestInProgress
         case (409, "request_already_completed"): return .requestAlreadyCompleted

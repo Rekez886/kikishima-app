@@ -5,6 +5,7 @@ struct HomeCaptionPreview: View {
     var source: String
     var translation: String
     var status: String
+    var warning = false
     var compact: Bool
     var display: String
     var desktop: Bool
@@ -29,38 +30,48 @@ struct HomeCaptionPreview: View {
     var body: some View {
         VStack(spacing: 10) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: KKSpace.one) {
+                    if display != "source", !translation.isEmpty {
+                        Text(translation)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(KKColor.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if display != "translation", !source.isEmpty {
                         Text(source)
                             .font(.system(size: display == "source" ? 16 : 12,
                                           weight: display == "source" ? .medium : .regular))
-                            .foregroundStyle(display == "source" ? Color.white : Color(white: 0.7))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if display != "source", !translation.isEmpty {
-                        Text(translation)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(display == "source" ? KKColor.textPrimary : KKColor.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if source.isEmpty && translation.isEmpty {
-                        Text(status).font(.system(size: 13)).foregroundStyle(Color(white: 0.7))
+                        Text(status).font(.system(size: 13))
+                            .foregroundStyle(warning ? KKColor.warning : KKColor.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.leading, 10)
+                .overlay(alignment: .leading) {
+                    if !source.isEmpty || !translation.isEmpty {
+                        Rectangle().fill(KKColor.brand).frame(width: 2)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(height: compact ? 62 : 102)
             .padding(.horizontal, 20).padding(.vertical, 16)
-            .background(Color(white: 0.045), in: RoundedRectangle(cornerRadius: desktop ? 12 : 24))
+            .background(KKColor.notchBackground, in: RoundedRectangle(cornerRadius: desktop ? 12 : 24))
             .overlay {
                 RoundedRectangle(cornerRadius: desktop ? 12 : 24)
-                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                    .strokeBorder(KKColor.historyInk.opacity(0.08), lineWidth: 1)
             }
             .frame(maxWidth: 400)
+            .environment(\.colorScheme, .dark)
 
             Text(isExample ? tr("字幕预览 · 示例") : status)
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .font(.system(size: 11))
+                .foregroundStyle(warning && !isExample ? KKColor.warning : KKColor.textSecondary)
+                .accessibilityIdentifier("kk-preview-listening-status")
                 .lineLimit(2).multilineTextAlignment(.center)
         }
         .padding(.vertical, 8)
@@ -93,6 +104,7 @@ struct HomeCaptionControls: View {
                 options
             }
         }
+        .kkNeutralControls()
     }
     private var actions: some View {
         HStack(spacing: 8) {
@@ -101,11 +113,12 @@ struct HomeCaptionControls: View {
                       systemImage: active ? "stop.fill" : "play.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .frame(minWidth: 132).padding(.vertical, 5)
-            }.buttonStyle(.borderedProminent).tint(active ? .red : .accentColor)
+            }.kkPrimaryButton(active: active)
             if running {
                 Button(action: pause) {
                     Image(systemName: paused ? "play.fill" : "pause.fill").padding(.vertical, 5)
                 }
+                .buttonStyle(KKQuietButtonStyle())
                 .accessibilityLabel(paused ? tr("继续字幕") : tr("暂停字幕"))
                 .help(paused ? tr("继续字幕") : tr("暂停字幕"))
                 .disabled(transition)
@@ -114,19 +127,21 @@ struct HomeCaptionControls: View {
     }
     private var options: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Toggle(tr("紧凑字幕"), isOn: $compact).toggleStyle(.switch).controlSize(.small)
+            Toggle(tr("紧凑字幕"), isOn: $compact).toggleStyle(KKSwitchToggleStyle()).controlSize(.small)
+                .accessibilityLabel(tr("紧凑字幕"))
+                .accessibilityIdentifier("kk-compact-captions")
                 .help(tr("紧凑字幕（只显示最近两句）"))
             ViewThatFits(in: .horizontal) {
-                displayPicker.pickerStyle(.segmented).labelsHidden().fixedSize()
+                KKSegmentedPicker(title: tr("显示内容"), selection: $display, options: [(tr("双语"), "both"), (tr("仅译文"), "translation"), (tr("仅原文"), "source")]).fixedSize()
                 displayPicker.pickerStyle(.menu)
             }
         }
     }
     private var displayPicker: some View {
         Picker(tr("显示内容"), selection: $display) {
-            Text(tr("原文 + 译文")).tag("both")
+            Text(tr("双语")).tag("both")
             Text(tr("仅译文")).tag("translation")
             Text(tr("仅原文")).tag("source")
-        }
+        }.buttonStyle(.automatic)
     }
 }

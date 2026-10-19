@@ -11,7 +11,7 @@ Translation and accounts go through the Kikishima service (`api.kikishima.com`);
 
 ## Download
 
-Latest signed and notarized build: [Kikishima-0.41.dmg](https://downloads.kikishima.com/Kikishima-0.41.dmg). The app updates itself via Sparkle.
+Latest signed and notarized build: [Kikishima-0.42.dmg](https://downloads.kikishima.com/Kikishima-0.42.dmg). The app updates itself via Sparkle.
 
 ## Requirements
 
@@ -35,8 +35,8 @@ Notes:
     -Xswiftc -F -Xswiftc "$PWD/Vendor" \
     -Xlinker -F -Xlinker "$PWD/Vendor"
   ```
-- Signing: `build.sh` signs with the identity in `SIGN_ID` (a Developer ID Application certificate) if it's in your keychain. Otherwise it falls back to a local code-signing certificate named `MeetingCaptionsDev`, which you need to create yourself in Keychain Access. Distribution, notarization (`release.sh`) and Sparkle update signing require your own Apple Developer ID, notary credentials and Sparkle keys.
-- Sign in with Apple only works with a provisioning profile for your own team.
+- Signing: `build.sh` only ad-hoc signs the app so it runs on your own Mac. Distribution, notarization and Sparkle update signing require your own Apple Developer ID, notary credentials and Sparkle keys, and are not part of this repository.
+- Sign in with Apple only works with a provisioning profile for your own team (see `Resources/Kikishima-applesignin.entitlements`).
 
 ## Chrome extension
 
@@ -68,7 +68,7 @@ Kikishima（聞き島）は、Mac で再生中の会議音声をリアルタイ�
 
 ### ダウンロード
 
-署名・公証済みの最新ビルド：[Kikishima-0.41.dmg](https://downloads.kikishima.com/Kikishima-0.41.dmg)。アプリは Sparkle で自動アップデートされます。
+署名・公証済みの最新ビルド：[Kikishima-0.42.dmg](https://downloads.kikishima.com/Kikishima-0.42.dmg)。アプリは Sparkle で自動アップデートされます。
 
 ### 動作環境
 
@@ -77,11 +77,11 @@ Kikishima（聞き島）は、Mac で再生中の会議音声をリアルタイ�
 
 ### ソースからビルド
 
-Xcode プロジェクトはありません。`./build.sh` で `build/Kikishima.app` を生成・署名します。
+Xcode プロジェクトはありません。`./build.sh` で `build/Kikishima.app` を生成し、ad-hoc 署名します。
 
 - `build.sh` 内で Python 3 を使います。
 - Sparkle は `Vendor/` 内のビルド済みフレームワークです。`swift build` が Sparkle を見つけられない場合は、上記の英語セクションにあるとおり `Vendor` を絶対パスで `-F` に渡してください。
-- 署名：キーチェーンに `SIGN_ID` の Developer ID 証明書があればそれを使い、なければ自分で作成するローカル証明書 `MeetingCaptionsDev` を使います。配布・公証（`release.sh`）・Sparkle 署名には、ご自身の Apple Developer ID・公証用認証情報・Sparkle 鍵が必要です。
+- 署名：`build.sh` は自分の Mac で動かすための ad-hoc 署名だけを行います。配布・公証・Sparkle 署名には、ご自身の Apple Developer ID・公証用認証情報・Sparkle 鍵が必要で、このリポジトリには含まれません。
 
 ### Chrome 拡張機能
 
@@ -106,7 +106,7 @@ Kikishima（聞き島）是一款 macOS 菜单栏应用，把 Mac 上正在播�
 
 ### 下载
 
-已签名、已公证的最新版本：[Kikishima-0.41.dmg](https://downloads.kikishima.com/Kikishima-0.41.dmg)。应用会通过 Sparkle 自动更新。
+已签名、已公证的最新版本：[Kikishima-0.42.dmg](https://downloads.kikishima.com/Kikishima-0.42.dmg)。应用会通过 Sparkle 自动更新。
 
 ### 系统要求
 
@@ -115,11 +115,11 @@ Kikishima（聞き島）是一款 macOS 菜单栏应用，把 Mac 上正在播�
 
 ### 从源码构建
 
-没有 Xcode 工程。运行 `./build.sh` 生成并签名 `build/Kikishima.app`。
+没有 Xcode 工程。运行 `./build.sh` 生成 `build/Kikishima.app` 并做 ad-hoc 签名。
 
 - `build.sh` 会用到 Python 3。
 - Sparkle 是 `Vendor/` 里预编译的 framework。如果 `swift build` 找不到 Sparkle，按英文部分的示例用绝对路径给 `-F` 传 `Vendor`。
-- 签名：钥匙串里有 `SIGN_ID` 指定的 Developer ID 证书就用它，否则回落到需要你自己创建的本地证书 `MeetingCaptionsDev`。分发、公证（`release.sh`）和 Sparkle 更新签名都需要你自己的 Apple Developer ID、公证凭证和 Sparkle 密钥。
+- 签名：`build.sh` 只做 ad-hoc 签名，供本机运行。分发、公证和 Sparkle 更新签名需要你自己的 Apple Developer ID、公证凭证和 Sparkle 密钥，不在本仓库里。
 
 ### Chrome 扩展
 

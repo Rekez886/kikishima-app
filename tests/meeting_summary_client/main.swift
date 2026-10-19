@@ -58,14 +58,14 @@ private func content(sourceID: String = "segment-1") -> MeetingSummaryContent {
     )
 }
 
-private func request(text: String = "Jay will send the slides.") -> SummarizeRequest {
+private func request(text: String = "Ken will send the slides.") -> SummarizeRequest {
     SummarizeRequest(
         requestID: "request-1",
         previous: nil,
         previousSourceIDs: [],
         segments: [SummarySourceSegment(id: "segment-1", startSeconds: 0, text: text)],
         targetLanguage: "English",
-        aliases: ["Jay"],
+        aliases: ["Ken"],
         final: false,
         schemaVersion: 1,
         promptVersion: "2026-08-31-v1"

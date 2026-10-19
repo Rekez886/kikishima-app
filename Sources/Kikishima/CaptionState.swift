@@ -25,15 +25,22 @@ struct CaptionChunk: Identifiable {
     var displayTranslation: String { zh.isEmpty || translationComplete ? zh : zh + " …" }
 }
 
-/// 音频线程写、主线程读的电平表：不加锁、不分配（Double 写在 arm64 上是原子的，读到旧一帧无所谓）
+/// 音频线程写、主线程读；锁保护整组电平与时间戳，snapshot 一次读取一致状态。
 final class AudioMeter: @unchecked Sendable {
-    private(set) var level: Double = 0
-    private(set) var lastLoudAt: CFAbsoluteTime = 0
-    private(set) var lastIOAt: CFAbsoluteTime = 0
+    struct Snapshot { let level: Double; let lastLoudAt: CFAbsoluteTime; let lastIOAt: CFAbsoluteTime }
+    private let lock = NSLock()
+    private var level: Double = 0
+    private var lastLoudAt: CFAbsoluteTime = 0
+    private var lastIOAt: CFAbsoluteTime = 0
     private var lastCalc: CFAbsoluteTime = 0
-    func reset() { level = 0; lastLoudAt = CFAbsoluteTimeGetCurrent(); lastIOAt = 0; lastCalc = 0 }
+    func snapshot() -> Snapshot {
+        lock.lock(); defer { lock.unlock() }
+        return Snapshot(level: level, lastLoudAt: lastLoudAt, lastIOAt: lastIOAt)
+    }
+    func reset() { lock.lock(); defer { lock.unlock() }; level = 0; lastLoudAt = CFAbsoluteTimeGetCurrent(); lastIOAt = 0; lastCalc = 0 }
     /// 音频回调里调：取第一路的 RMS，10Hz 节流，每 8 个采样取一个
     func ingest(_ list: UnsafePointer<AudioBufferList>, format: AVAudioFormat) {
+        lock.lock(); defer { lock.unlock() }
         let now = CFAbsoluteTimeGetCurrent()
         lastIOAt = now
         guard now - lastCalc > 0.1, format.commonFormat == .pcmFormatFloat32, list.pointee.mNumberBuffers > 0 else { return }
@@ -97,6 +104,9 @@ final class CaptionState {
     )
 
     init() {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return }
+#endif
         // 首次启动：界面语言与译文语言跟随系统语言（引导第一页就已是用户的语言，之后由「你最熟悉的语言」页改）
         if uiLanguage.isEmpty {
             let d = UILang.systemDefault
@@ -150,7 +160,11 @@ final class CaptionState {
     private var micPollTimer: Timer?
     /// 紧凑字幕：只显示最近两句译文、大字、无原文
     var compactCaptions: Bool = UserDefaults.standard.bool(forKey: "compactCaptions") {
-        didSet { UserDefaults.standard.set(compactCaptions, forKey: "compactCaptions"); CaptionPanelController.shared.applyAppearance(); applyPlacement(force: true) }
+        didSet {
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { CaptionPanelController.shared.applyAppearance(); return }
+#endif
+ UserDefaults.standard.set(compactCaptions, forKey: "compactCaptions"); CaptionPanelController.shared.applyAppearance(); applyPlacement(force: true) }
     }
     /// Meeting captions start as a camera-housing island, then expand when text arrives.
     var islandExpanded = false
@@ -180,9 +194,17 @@ final class CaptionState {
         }
     }
     var captionWidthFraction: Double { CaptionAppearance.widthFraction(CaptionSizeLevel(rawValue: captionWidthLevel) ?? .medium) }
-    /// 字幕窗背景不透明度 0.3～1（默认 0.92）
-    var captionOpacity: Double = UserDefaults.standard.object(forKey: "captionOpacity") as? Double ?? 0.92 {
-        didSet { UserDefaults.standard.set(captionOpacity, forKey: "captionOpacity"); CaptionPanelController.shared.applyAppearance() }
+    /// 字幕窗背景不透明度：读取时钳制到 WCAG 计算下限，不回写旧偏好。
+    var captionOpacity: Double = CaptionOpacityPolicy.clamped(UserDefaults.standard.object(forKey: "captionOpacity") as? Double ?? CaptionOpacityPolicy.defaultValue) {
+        didSet {
+            let normalized = CaptionOpacityPolicy.clamped(captionOpacity)
+            if captionOpacity != normalized { captionOpacity = normalized }
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { CaptionPanelController.shared.applyAppearance(); return }
+#endif
+            UserDefaults.standard.set(captionOpacity, forKey: "captionOpacity")
+            CaptionPanelController.shared.applyAppearance()
+        }
     }
     /// 紧凑模式点击穿透：字幕窗不拦鼠标（Wakaru 式）。开着就拖不动，用「重置字幕位置」/ 场景切换摆位
     var captionClickThrough: Bool = UserDefaults.standard.bool(forKey: "captionClickThrough") {
@@ -237,7 +259,11 @@ final class CaptionState {
         case .auto: target = Self.micInUse() ? .meeting : .video
         }
         if target != effectiveMode || force || always {
+            let wasIsland = usesIslandCaptions
             effectiveMode = target
+            if wasIsland != usesIslandCaptions {
+                CaptionPanelController.shared.switchSurface(showIfRunning: false, force: force)
+            }
             CaptionPanelController.shared.place(for: target, force: force)
         }
     }
@@ -255,6 +281,7 @@ final class CaptionState {
                 if self.pollTick % 8 == 0 {
                     if self.captionMode == .auto { self.applyPlacement() }
                     if self.effectiveMode == .video { CaptionPanelController.shared.followSourceIfMoved() }
+                    else if self.usesIslandCaptions { CaptionPanelController.shared.place(for: .meeting) }
                 }
                 if self.pollTick % 240 == 0 { self.refreshPlan() }
             }
@@ -270,7 +297,12 @@ final class CaptionState {
     }
     var running = false
     var starting = false           // start() 已发出、tap/引擎尚未就绪：期间再按 = 取消
-    var status = trAny("就绪")   // 属性初值不能用 tr()：它会读 CaptionState.shared，初始化时递归 → 崩溃
+    private var statusMessage: String?
+    // Resolve the idle status after uiLanguage exists, without reading shared during init.
+    var status: String {
+        get { statusMessage ?? (L10nTables.table(uiLanguage)["就绪"] ?? "就绪") }
+        set { statusMessage = newValue }
+    }
     var errorBanner: CaptionBanner?
     /// 翻译暂停（额度用完 / 需订阅 / 会话失效）：继续转写显示原文，不再发请求
     var translationPaused = false
@@ -319,6 +351,8 @@ final class CaptionState {
     private var meetingSummaryFinalizationOwner: Int?
     private var finalTranscriptOwner: Int?
     private var meetingSummaryGeneration: Int?
+    // Summary retries allocate an owner without invalidating translation callbacks.
+    private var meetingSummaryRetryGeneration = 0
     private var meetingSummaryRecordID: String?
     private var meetingSummarySessionBegan = false
     private var lastMeetingSummaryEvaluationAt: Date?
@@ -335,11 +369,25 @@ final class CaptionState {
     }
     var zhFontSize: Double { CaptionAppearance.fontSize(CaptionSizeLevel(rawValue: captionFontLevel) ?? .medium) }
     /// 字幕落在哪：island = 摄像头下的岛；window = 普通桌面浮窗（可拖、可改大小、贴屏幕底部）
-    var captionSurface: String = UserDefaults.standard.string(forKey: "captionSurface") ?? "island" {
-        didSet { UserDefaults.standard.set(captionSurface, forKey: "captionSurface"); CaptionPanelController.shared.switchSurface() }
+    var captionSurface: String = CaptionSurfacePreference.load(from: .standard) {
+        didSet {
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { CaptionPanelController.shared.switchSurface(); return }
+#endif
+ UserDefaults.standard.set(captionSurface, forKey: "captionSurface"); CaptionPanelController.shared.switchSurface() }
+    }
+    func selectCaptionSurface(_ value: String) {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { captionSurface = value; return }
+#endif
+        CaptionSurfacePreference.select(value, in: .standard)
+        captionSurface = value
+    }
+    var usesIslandCaptions: Bool {
+        effectiveMode == .meeting && CaptionSurfacePreference.usesIsland(surface: captionSurface)
     }
     var supportsIslandSizing: Bool {
-        captionSurface == "island" && effectiveMode == .meeting && IslandNotchController.enabled
+        usesIslandCaptions
     }
     /// 字幕字体族：system / rounded / serif / mono（中日韩由系统按族回落到苹方 / 圆体等）
     var captionFontFamily: String = UserDefaults.standard.string(forKey: "captionFontFamily") ?? "system" {
@@ -390,7 +438,11 @@ final class CaptionState {
             settingsOpen: islandSettingsOpen, paused: paused, hasBanner: errorBanner != nil)
     }
     var model: String = UserDefaults.standard.string(forKey: "model") ?? "gpt-5.6-luna" {
-        didSet { UserDefaults.standard.set(model, forKey: "model"); translator.model = model }
+        didSet {
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { return }
+#endif
+ UserDefaults.standard.set(model, forKey: "model"); translator.model = model }
     }
     var localeID: String = UserDefaults.standard.string(forKey: "locale") ?? "en_US" {
         didSet { UserDefaults.standard.set(localeID, forKey: "locale") }
@@ -403,8 +455,9 @@ final class CaptionState {
     var meetingLocales: [String] = UserDefaults.standard.stringArray(forKey: "meetingLocales") ?? [] {
         didSet { UserDefaults.standard.set(meetingLocales, forKey: "meetingLocales") }
     }
-    /// 各 locale 转写模型下载进度：0~1，1 = 已就绪；缺项 = 未开始
+    /// 各 locale 转写模型下载进度；安装状态单独从 Speech 查询。
     var modelProgress: [String: Double] = [:]
+    private var installedModelLocales: Set<String> = []
     private var predownloadTask: Task<Void, Never>?
 
     /// 选了会议语言就立刻后台下载模型（默认开）；关掉 = 开始字幕时再按需下载当前语言
@@ -414,13 +467,34 @@ final class CaptionState {
             if autoDownloadModels { predownloadModels(meetingLocales) } else { predownloadTask?.cancel(); predownloadTask = nil; for (k, v) in modelProgress where v < 1 { modelProgress[k] = nil } }
         }
     }
-    /// 某会议语言的模型是否已就绪（预下载完成，或在常用列表里已下过）
-    func modelReady(_ locale: String) -> Bool { modelProgress[locale] == 1 }
+    /// 只认系统实际安装的模型；进度完成或选中了语言均不能代替安装状态。
+    func modelReady(_ locale: String) -> Bool {
+        installedModelLocales.contains(TranscribeEngine.modelLocaleKey(locale))
+    }
+
+    func refreshModelInstallation() async {
+        installedModelLocales = await TranscribeEngine.installedModelLocales()
+    }
+
+    /// Remove immediately; a failed asynchronous release never restores the row.
+    func removeMeetingLocale(_ identifier: String) {
+        meetingLocales.removeAll { $0 == identifier }
+        modelProgress[identifier] = nil
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return }
+#endif
+        Task {
+            let key = TranscribeEngine.modelLocaleKey(identifier)
+            guard !meetingLocales.contains(where: { TranscribeEngine.modelLocaleKey($0) == key }) else { return }
+            _ = await TranscribeEngine.releaseModelLocale(identifier)
+            await refreshModelInstallation()
+        }
+    }
 
     /// 后台预下载所选会议语言的转写模型（不阻塞引导，可重复调用；正在下载的不重复起）
     func predownloadModels(_ locales: [String]) {
         guard autoDownloadModels else { return }
-        let todo = locales.filter { modelProgress[$0] == nil }
+        let todo = locales.filter { !modelReady($0) && modelProgress[$0] == nil }
         guard !todo.isEmpty else { return }
         for l in todo { modelProgress[l] = 0 }
         predownloadTask = Task {
@@ -430,12 +504,18 @@ final class CaptionState {
                 do {
                     if let req = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
                         let obs = req.progress.observe(\.fractionCompleted, options: [.new]) { p, _ in
-                            Task { @MainActor in CaptionState.shared.modelProgress[l] = min(0.99, p.fractionCompleted) }
+                            Task { @MainActor in
+                                let state = CaptionState.shared
+                                if state.modelProgress[l] != nil {
+                                    state.modelProgress[l] = min(0.99, p.fractionCompleted)
+                                }
+                            }
                         }
+                        defer { obs.invalidate() }
                         try await req.downloadAndInstall()
-                        obs.invalidate()
                     }
-                    modelProgress[l] = 1
+                    await refreshModelInstallation()
+                    modelProgress[l] = nil
                 } catch {
                     modelProgress[l] = nil   // 失败：允许再试
                 }
@@ -445,6 +525,10 @@ final class CaptionState {
     // 术语表：每行一条。纯词条 = 保留原文（人名/项目名）；「原词 → 译法」= 指定译法
     var glossary: String = UserDefaults.standard.string(forKey: "glossary") ?? "" {
         didSet {
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { return }
+#endif
+
             UserDefaults.standard.set(glossary, forKey: "glossary")
             meetingSessionContext.updatePermanentGlossary(glossary)
             translator.glossary = meetingSessionContext.effectiveGlossary
@@ -452,7 +536,11 @@ final class CaptionState {
     }
     // 目标语言（英文名进 prompt）
     var targetLang: String = UserDefaults.standard.string(forKey: "targetLang") ?? "Simplified Chinese" {
-        didSet { UserDefaults.standard.set(targetLang, forKey: "targetLang"); translator.targetLanguage = targetLang }
+        didSet {
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { return }
+#endif
+ UserDefaults.standard.set(targetLang, forKey: "targetLang"); translator.targetLanguage = targetLang }
     }
     var summaryConsent: MeetingSummaryConsent = MeetingSummaryConsent(
         rawValue: UserDefaults.standard.string(forKey: "meetingSummaryConsent") ?? ""
@@ -472,10 +560,18 @@ final class CaptionState {
     }
     // 翻译引擎：true = 内置 AI（自家代理，订阅）；false = 自备 OpenAI key（代码保留，UI 不露出）
     var useProxy: Bool = UserDefaults.standard.object(forKey: "useProxy") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(useProxy, forKey: "useProxy"); translator.useProxy = useProxy }
+        didSet {
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { return }
+#endif
+ UserDefaults.standard.set(useProxy, forKey: "useProxy"); translator.useProxy = useProxy }
     }
     var proxyURL: String = SessionControls.resolvedAPIBase(UserDefaults.standard.string(forKey: "proxyURL") ?? SessionControls.productionAPI) {
         didSet {
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { return }
+#endif
+
             let pinned = SessionControls.resolvedAPIBase(proxyURL)
             if pinned != proxyURL {
                 proxyURL = pinned
@@ -487,7 +583,11 @@ final class CaptionState {
     }
     // 会话令牌：登录换取，30 天有效
     var sessionToken: String = SessionTokenStore.load() {
-        didSet { SessionTokenStore.save(sessionToken); translator.sessionToken = sessionToken }
+        didSet {
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { return }
+#endif
+ authGeneration += 1; SessionTokenStore.save(sessionToken); translator.sessionToken = sessionToken }
     }
     var plan: String = UserDefaults.standard.string(forKey: "plan") ?? "" {
         didSet { UserDefaults.standard.set(plan, forKey: "plan") }
@@ -507,8 +607,7 @@ final class CaptionState {
     var usageQuota = 0
     /// 剩余分钟（240000 token ≈ 60 分钟 → 4000 token/分钟）；未知时 nil
     var remainingMinutes: Int? {
-        guard usageQuota > 0, plan != "dev" else { return nil }
-        return max(0, (usageQuota - usageTokens) / 4000)
+        PlanQuotaPolicy.remainingMinutes(plan: plan, tokens: usageTokens, quota: usageQuota)
     }
 
     /// 每台安装一个随机 ID，代替电脑名（电脑名常含用户真名）
@@ -546,8 +645,26 @@ final class CaptionState {
         }
     }
 
+    private var authGeneration = 0
+    private struct AuthRequestContext { let epoch: Int; let account: String }
+    private func authContext() -> AuthRequestContext { .init(epoch: authGeneration, account: accountEmail) }
+    private func authIsCurrent(_ context: AuthRequestContext) -> Bool {
+        AuthResponsePolicy.accepts(requestGeneration: context.epoch, currentGeneration: authGeneration,
+                                   requestAccount: context.account, currentAccount: accountEmail)
+    }
+    private func beginAuthRequest() -> AuthRequestContext {
+        authGeneration += 1
+        pendingWebState = nil
+        signInTimeout?.cancel(); signInTimeout = nil
+        return authContext()
+    }
+
     /// 统一 POST 服务器认证端点；成功回 JSON，失败写 activationError 并回 nil
-    private func postAuth(_ path: String, _ payload: [String: Any]) async -> [String: Any]? {
+    private func postAuth(_ path: String, _ payload: [String: Any], context: AuthRequestContext) async -> [String: Any]? {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return nil }
+#endif
+        guard authIsCurrent(context) else { return nil }
         guard let url = URL(string: proxyURL.trimmingCharacters(in: .init(charactersIn: "/")) + path) else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -557,6 +674,7 @@ final class CaptionState {
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         do {
             let (data, resp) = try await Translator.session.data(for: req)
+            guard authIsCurrent(context) else { return nil }
             let http = resp as? HTTPURLResponse
             let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
             guard http?.statusCode == 200 else {
@@ -566,6 +684,7 @@ final class CaptionState {
             }
             return json
         } catch {
+            guard authIsCurrent(context) else { return nil }
             activationError = tr("连不上服务器：%@", error.localizedDescription)
             return nil
         }
@@ -574,6 +693,7 @@ final class CaptionState {
     /// 服务器回的会话统一落地
     private func acceptSession(_ json: [String: Any]) {
         guard let token = json["session"] as? String else { activationError = tr("服务器没有返回会话"); return }
+        activating = false
         sessionToken = token
         plan = json["plan"] as? String ?? "free"
         if let e = json["email"] as? String { accountEmail = e }
@@ -590,46 +710,41 @@ final class CaptionState {
         let e = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard e.contains("@") else { activationError = tr("邮箱格式不对"); return }
         activating = true; activationError = ""
+        let context = beginAuthRequest()
         Task {
-            defer { activating = false }
-            if await postAuth("/auth/email/start", ["email": e]) != nil { accountEmail = e; codeSent = true }
+            guard authIsCurrent(context) else { return }
+            defer { if authGeneration == context.epoch { activating = false } }
+            if await postAuth("/auth/email/start", ["email": e], context: context) != nil, authIsCurrent(context) { accountEmail = e; codeSent = true }
         }
     }
 
     /// 邮箱登录第二步：验证码换会话
     func verifyEmailCode(code: String) {
         activating = true; activationError = ""
+        let context = beginAuthRequest()
         Task {
-            defer { activating = false }
+            guard authIsCurrent(context) else { return }
+            defer { if authGeneration == context.epoch { activating = false } }
             let payload: [String: Any] = ["email": accountEmail, "code": code.filter(\.isNumber), "device": deviceLabel]
-            if let json = await postAuth("/auth/email/verify", payload) { acceptSession(json) }
+            if let json = await postAuth("/auth/email/verify", payload, context: context), authIsCurrent(context) { acceptSession(json) }
         }
     }
 
-    /// 「使用 Google 登录」一键：浏览器授权 → id_token → 服务器换会话
+    /// Google 登录统一走 Worker 网页授权，不需要客户端凭证。
     func signInWithGoogle() {
-        guard GoogleSignIn.isConfigured else { activationError = tr("Google 登录尚未配置"); return }
-        activating = true; activationError = ""
-        status = tr("已在浏览器打开 Google 登录…")
-        GoogleSignIn.shared.start { [weak self] result in
-            Task { @MainActor in
-                guard let self else { return }
-                switch result {
-                case .success(let idToken): self.signIn(provider: "google", idToken: idToken, nonce: GoogleSignIn.shared.nonce)
-                case .failure(let e):
-                    self.activating = false
-                    if let g = e as? GoogleSignIn.GError, case .cancelled = g { return }   // 用户自己取消：静默
-                    self.activationError = e.localizedDescription
-                }
-            }
-        }
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return }
+#endif
+        guard !activating else { return }
+        guard serverProviders.google else { activationError = tr("Google 登录尚未配置"); return }
+        startWebSignIn(provider: "google")
     }
 
     /// 取消进行中的第三方登录（浏览器没回来 / 点错了）：按钮马上恢复
     func cancelSignIn() {
-        GoogleSignIn.shared.cancel()
+        authGeneration += 1
         signInTimeout?.cancel(); signInTimeout = nil
-        pendingAppleState = nil
+        pendingWebState = nil
         activating = false
         activationError = ""
         if !running { status = trAny("就绪") }
@@ -638,6 +753,9 @@ final class CaptionState {
     /// 服务器已配置的第三方登录（GET /auth/providers）
     var serverProviders: (google: Bool, apple: Bool) = (false, false)
     func probeProviders() {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return }
+#endif
         guard let url = URL(string: proxyURL.trimmingCharacters(in: .init(charactersIn: "/")) + "/auth/providers") else { return }
         Task {
             guard let (data, resp) = try? await Translator.session.data(for: URLRequest(url: url)), (resp as? HTTPURLResponse)?.statusCode == 200,
@@ -648,7 +766,7 @@ final class CaptionState {
     var canSignInWithApple: Bool { AppleSignIn.isAvailable || serverProviders.apple }
 
     /// Apple 登录：有原生权利走 ASAuthorization；否则开浏览器走服务器的网页流程，回跳 kikishima:// 深链
-    private var pendingAppleState: String?
+    private var pendingWebState: String?
     private var signInTimeout: Task<Void, Never>?
     private static func randomState() -> String {
         var bytes = [UInt8](repeating: 0, count: 16)
@@ -657,11 +775,16 @@ final class CaptionState {
     }
 
     func signInWithApple() {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return }
+#endif
+        guard !activating else { return }
         if AppleSignIn.isAvailable {
             activating = true; activationError = ""
+            let context = beginAuthRequest()
             AppleSignIn.shared.start { [weak self] result in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, self.authIsCurrent(context) else { return }
                     switch result {
                     case .success(let idToken): self.signIn(provider: "apple", idToken: idToken, nonce: AppleSignIn.shared.nonce)
                     case .failure(let e):
@@ -674,30 +797,45 @@ final class CaptionState {
             return
         }
         guard serverProviders.apple else { activationError = tr("Apple 登录尚未配置"); return }
-        guard var c = URLComponents(string: proxyURL.trimmingCharacters(in: .init(charactersIn: "/")) + "/auth/apple/start") else { activationError = tr("服务器地址无效"); return }
-        // 一次性 state：回跳的深链必须原样带回来，任意网页 location.href 到 kikishima:// 换不了我们的账号
+        startWebSignIn(provider: "apple")
+    }
+
+    /// 两个网页入口共享唯一的 pending state、超时和 handoff；新尝试不能覆盖进行中的登录。
+    private func startWebSignIn(provider: String) {
+        guard !activating, provider == "google" || provider == "apple" else { return }
+        guard var c = URLComponents(string: proxyURL.trimmingCharacters(in: .init(charactersIn: "/")) + "/auth/\(provider)/start"),
+              c.scheme == "https" || c.scheme == "http", c.host != nil else {
+            activationError = tr("服务器地址无效"); return
+        }
         let st = Self.randomState()
-        pendingAppleState = st
         c.queryItems = [URLQueryItem(name: "device", value: deviceLabel), URLQueryItem(name: "state", value: st)]
         guard let url = c.url else { activationError = tr("服务器地址无效"); return }
+        let context = beginAuthRequest()
+        pendingWebState = st
         activationError = ""; activating = true
-        status = tr("已在浏览器打开 Apple 登录…")
+        status = provider == "google" ? tr("已在浏览器打开 Google 登录…") : tr("已在浏览器打开 Apple 登录…")
         NSWorkspace.shared.open(url)
-        signInTimeout?.cancel()
         signInTimeout = Task { [weak self] in
             try? await Task.sleep(for: .seconds(180))
-            guard !Task.isCancelled, let self, self.activating, self.pendingAppleState == st else { return }
-            self.activating = false; self.pendingAppleState = nil
-            self.activationError = tr("登录超时，请重试")
+            guard !Task.isCancelled, let self else { return }
+            self.expireWebSignIn(state: st, context: context)
         }
+    }
+
+    private func expireWebSignIn(state: String, context: AuthRequestContext) {
+        guard authIsCurrent(context), activating, pendingWebState == state else { return }
+        authGeneration += 1
+        activating = false; pendingWebState = nil
+        signInTimeout = nil
+        activationError = tr("登录超时，请重试")
     }
 
     /// 深链回跳落地：kikishima://signed-in?code=…&state=…（或 ?error=…&state=…）。深链只带一次性交换码，会话由服务器直接给 app
     func handleAuthCallback(_ url: URL) {
-        guard url.host == "signed-in", let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return }
+        guard url.scheme == "kikishima", url.host == "signed-in", let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return }
         let q = Dictionary(items.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { a, _ in a })
-        guard let expected = pendingAppleState, !expected.isEmpty, q["state"] == expected else { return }   // 不是我们发出去的：忽略
-        pendingAppleState = nil
+        guard let expected = pendingWebState, !expected.isEmpty, q["state"] == expected else { return }   // 不是我们发出去的：忽略
+        pendingWebState = nil
         signInTimeout?.cancel(); signInTimeout = nil
         if let err = q["error"], !err.isEmpty {
             activating = false
@@ -706,9 +844,11 @@ final class CaptionState {
             return
         }
         guard let code = q["code"], !code.isEmpty else { activating = false; return }
+        let context = beginAuthRequest()
         Task {
-            defer { activating = false }
-            if let json = await postAuth("/auth/handoff", ["code": code]) { acceptSession(json) }
+            guard authIsCurrent(context) else { return }
+            defer { if authGeneration == context.epoch { activating = false } }
+            if let json = await postAuth("/auth/handoff", ["code": code], context: context), authIsCurrent(context) { acceptSession(json) }
         }
     }
 
@@ -717,9 +857,11 @@ final class CaptionState {
         let c = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !c.isEmpty, !sessionToken.isEmpty else { return }
         activating = true; activationError = ""
+        let context = beginAuthRequest()
         Task {
-            defer { activating = false }
-            if let json = await postAuth("/auth/redeem", ["code": c]) { acceptSession(json); status = tr("邀请码已兑换，账号已升级 Pro") }
+            guard authIsCurrent(context) else { return }
+            defer { if authGeneration == context.epoch { activating = false } }
+            if let json = await postAuth("/auth/redeem", ["code": c], context: context), authIsCurrent(context) { acceptSession(json); status = tr("邀请码已兑换，账号已升级 Pro") }
         }
     }
 
@@ -733,6 +875,9 @@ final class CaptionState {
     private var upgradePollTask: Task<Void, Never>?
     /// 点「升级 Pro」：开结账页，随后 10 分钟内轮询 /me（前 2 分钟每 5 秒，之后每 15 秒；输卡号 + 3DS 常超过 2 分钟），付完不用手动刷新
     func openUpgrade() {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return }
+#endif
         NSWorkspace.shared.open(upgradeURL)
         upgradePollTask?.cancel()
         upgradePollTask = Task { [weak self] in
@@ -745,29 +890,35 @@ final class CaptionState {
         }
     }
 
-    /// Google / Apple：app 端拿到 ID token 后交服务器换会话
+    /// 原生 Apple 登录：app 端拿到 ID token 后交服务器换会话
     func signIn(provider: String, idToken: String, nonce: String? = nil) {
         activating = true; activationError = ""
+        let context = beginAuthRequest()
         Task {
-            defer { activating = false }
+            guard authIsCurrent(context) else { return }
+            defer { if authGeneration == context.epoch { activating = false } }
             var payload: [String: Any] = ["idToken": idToken, "device": deviceLabel]
             if let nonce, !nonce.isEmpty { payload["nonce"] = nonce }
-            if let json = await postAuth("/auth/\(provider)", payload) { acceptSession(json) }
+            if let json = await postAuth("/auth/\(provider)", payload, context: context), authIsCurrent(context) { acceptSession(json) }
         }
     }
 
     /// 拉一次 /me 刷新档位与用量（付费后 Polar webhook 已把服务器侧升 Pro，客户端靠这个跟上）
     /// 401 = 会话已失效 → 清会话并提示重新登录；其他错误（断网/5xx）保持现状
     func refreshPlan() {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return }
+#endif
         guard !sessionToken.isEmpty, plan != "dev" else { return }
         guard let url = URL(string: proxyURL.trimmingCharacters(in: .init(charactersIn: "/")) + "/me") else { return }
         var req = URLRequest(url: url)
         req.timeoutInterval = 15
+        let context = authContext()
         let token = sessionToken   // 请求发出时的 token：回来时若已换号/登出则丢弃结果
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         Task {
             guard let (data, resp) = try? await Translator.session.data(for: req), let http = resp as? HTTPURLResponse else { return }
-            guard token == sessionToken else { return }
+            guard authIsCurrent(context), token == sessionToken else { return }
             if http.statusCode == 401 { sessionExpired(); return }
             guard http.statusCode == 200, let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
             if let p = json["plan"] as? String, p != plan { plan = p }
@@ -782,7 +933,7 @@ final class CaptionState {
             lastPlanRefresh = Date()
             // 额度恢复（新的一周 / 升级）后自动解除暂停；免费池日限要到第二天或升 Pro
             if translationPaused, let reason = pauseReason {
-                let quotaBack = (remainingMinutes ?? 0) > 0 || plan == "dev"          // Pro 也可能把月额度用完：不能因为是 pro 就解除
+                let quotaBack = !PlanQuotaPolicy.shouldPauseForQuota(plan: plan) || (remainingMinutes ?? 0) > 0
                 let paid = plan == "pro" || plan == "dev"
                 let newDay = pausedAt.map { !Calendar.current.isDate($0, inSameDayAs: Date()) } ?? true
                 switch reason {
@@ -835,6 +986,11 @@ final class CaptionState {
     }
 
     func signOut() {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return }
+#endif
+        cancelSignIn()
+        upgradePollTask?.cancel(); upgradePollTask = nil
         sessionToken = ""; plan = ""; planExpires = nil; codeSent = false; activationError = ""
         usageTokens = 0; usageQuota = 0
         if running || starting {
@@ -861,9 +1017,11 @@ final class CaptionState {
         var payload: [String: Any] = ["licenseKey": trimmedKey, "device": deviceLabel]
         // 已在本机激活过则带上 activationId，只验证不重复激活（保护设备名额）
         if let a = UserDefaults.standard.string(forKey: "activationId"), !a.isEmpty { payload["activationId"] = a }
+        let context = beginAuthRequest()
         Task {
-            defer { activating = false }
-            if let json = await postAuth("/auth/license", payload) {
+            guard authIsCurrent(context) else { return }
+            defer { if authGeneration == context.epoch { activating = false } }
+            if let json = await postAuth("/auth/license", payload, context: context), authIsCurrent(context) {
                 if let a = json["activationId"] as? String { UserDefaults.standard.set(a, forKey: "activationId") }
                 acceptSession(json)
             }
@@ -896,7 +1054,11 @@ final class CaptionState {
 
     private let tap = SystemAudioTap()
     private let engine = TranscribeEngine()
+#if SHOOT || DEBUG
+    @ObservationIgnored private lazy var translator = Translator()
+#else
     private let translator = Translator()
+#endif
 
     // Apple 本地机翻草稿层：session 只能活在 translationTask 闭包里，用流转发请求
     // 草稿层用本机翻译处理正在说的句子，GPT 正式译文到达后替换灰色草稿
@@ -1028,6 +1190,9 @@ final class CaptionState {
     private var engineEpoch = 0
 
     func pause() {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { ShootSimulation.pause(self); return }
+#endif
         guard running, !paused else { return }
         guard SessionControls.canPause(switchingMeetingLanguage: switchingMeetingLanguage, resuming: resuming) else { return }
         restartTask?.cancel(); restartTask = nil
@@ -1046,6 +1211,9 @@ final class CaptionState {
     }
 
     func resume() {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { ShootSimulation.resume(self); return }
+#endif
         guard running, paused, !switchingMeetingLanguage else { return }
         guard resumeStart.begin() else { return }
         restartTask?.cancel(); restartTask = nil
@@ -1071,7 +1239,7 @@ final class CaptionState {
             }
             do {
                 try await engine.start(localeID: localeID) { [weak self] event in
-                    Task { @MainActor in guard let self, self.sessionGen == gen, self.engineEpoch == epoch else { return }; self.handle(event) }
+                    guard let self, self.sessionGen == gen, self.engineEpoch == epoch else { return }; self.handle(event, resultGeneration: gen)
                 }
                 try Task.checkCancellation()
                 guard running, sessionGen == gen else { engine.stop(); return }
@@ -1093,6 +1261,9 @@ final class CaptionState {
 
     /// 会前直接改默认语言；会中只重启转写引擎，保留同一份字幕、记录与会议总结。
     func selectMeetingLanguage(_ newLocaleID: String) {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { localeID = newLocaleID; return }
+#endif
         guard newLocaleID != localeID,
               SessionControls.canChangeMeetingLanguage(
                 starting: starting,
@@ -1139,10 +1310,8 @@ final class CaptionState {
             }
             do {
                 try await engine.start(localeID: newLocaleID) { [weak self] event in
-                    Task { @MainActor in
-                        guard let self, self.sessionGen == generation, self.engineEpoch == epoch else { return }
-                        self.handle(event)
-                    }
+                    guard let self, self.sessionGen == generation, self.engineEpoch == epoch else { return }
+                    self.handle(event, resultGeneration: generation)
                 }
                 try Task.checkCancellation()
                 guard running, sessionGen == generation, switchingMeetingLanguage else {
@@ -1250,7 +1419,6 @@ final class CaptionState {
 
     /// 探测系统音频权限（onboarding 用）：起一次 tap 立刻停；成功即已授权（会触发系统弹窗）
     func probeAudioPermission() async -> Bool {
-        guard !running, !starting else { return true }
         let probe = SystemAudioTap(watchesDevice: false)
         do {
             try probe.start { _, _, _, _, _ in }
@@ -1264,7 +1432,11 @@ final class CaptionState {
     /// 返回是否真的开始了（未登录 → 转去登录，不起 tap）
     @discardableResult
     func start() -> Bool {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { ShootSimulation.start(self); return true }
+#endif
         guard !running, !starting else { return false }
+        if drainingTranscription { status = tr("上一次启动还在收尾，请稍后再试"); return false }
         if !SessionControls.canStartNewMeeting(
             previousStartInFlight: startTask != nil,
             previousTranscriptPending: finalTranscriptTask != nil
@@ -1282,7 +1454,8 @@ final class CaptionState {
             selected: captionsToExtension ? nil : calendarCoordinator.selectedContext,
             permanentGlossary: glossary
         )
-        sessionGen += 1
+        // The coordinator orders generations; a new live session must follow retries.
+        sessionGen = max(sessionGen, meetingSummaryRetryGeneration) + 1
         let gen = sessionGen
         engineEpoch += 1
         let epoch = engineEpoch
@@ -1343,7 +1516,7 @@ final class CaptionState {
             startGenOwner = gen
             do {
                 try await engine.start(localeID: localeID) { [weak self] event in
-                    Task { @MainActor in guard let self, self.sessionGen == gen, self.engineEpoch == epoch else { return }; self.handle(event) }
+                    guard let self, self.sessionGen == gen, self.engineEpoch == epoch else { return }; self.handle(event, resultGeneration: gen)
                 }
                 try Task.checkCancellation()
                 try startTap()
@@ -1384,7 +1557,7 @@ final class CaptionState {
         else { CaptionPanelController.shared.show() }
     }
 
-    /// 音频电平（0~1）与静音 / 停摆判定：音频线程只写 meter（无锁无分配），主线程 timer 每 0.25 秒读一次写进这三个可观察属性
+    /// 音频电平（0~1）与静音 / 停摆判定：音频线程通过锁写入 meter，主线程 timer 每 0.25 秒读一次写进这三个可观察属性
     var audioLevel: Double = 0
     var silentTooLong = false     // 运行中连续 20 秒没声音（会议本来有安静段，只改状态行不弹横幅）
     var audioStalled = false      // IO 回调本身停了 5 秒以上（设备被拔 / 聚合设备卡死而默认设备没变，之前这种情况反而报不出来）
@@ -1404,9 +1577,10 @@ final class CaptionState {
     }
     private func pollMeter() {
         let now = CFAbsoluteTimeGetCurrent()
-        audioLevel = meter.level
-        audioStalled = meter.lastIOAt > 0 && now - meter.lastIOAt > 5
-        silentTooLong = !audioStalled && meter.lastLoudAt > 0 && now - meter.lastLoudAt > 20
+        let sample = meter.snapshot()
+        audioLevel = sample.level
+        audioStalled = sample.lastIOAt > 0 && now - sample.lastIOAt > 5
+        silentTooLong = !audioStalled && sample.lastLoudAt > 0 && now - sample.lastLoudAt > 20
     }
 
     /// 默认输出设备变了：只重建 tap（转写引擎与已出字幕都保留），0.6 秒去抖
@@ -1447,8 +1621,14 @@ final class CaptionState {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: w)
     }
 
+    private var drainingTranscription = false
+
     /// reason: nil = 失败路径，不覆盖 status；否则写入 status
     func stop(reason: String? = trAny("已停止")) {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { ShootSimulation.stop(self); return }
+#endif
+        guard !drainingTranscription else { return }
         let generation = sessionGen
         let meetingContextSnapshot = meetingSessionContext.selected
         startTask?.cancel()                   // 不置 nil：由任务自己的 defer 清，start() 在它退出前不重入
@@ -1462,9 +1642,23 @@ final class CaptionState {
         deviceChangeWork?.cancel()
         translator.cancelAll()
         tap.stop()
+        let wasRunning = running
+        if let reason { status = reason }
+        drainingTranscription = true
+        running = false
+        starting = false
+        Task { @MainActor in
+            await engine.finish()
+            // finish waits for synchronous event delivery before capturing the final record.
+            drainingTranscription = false
+            completeStop(generation: generation, meetingContextSnapshot: meetingContextSnapshot,
+                         wasRunning: wasRunning, reason: reason)
+        }
+    }
+
+    private func completeStop(generation: Int, meetingContextSnapshot: MeetingContext?, wasRunning: Bool, reason: String?) {
         engineEpoch += 1
-        // 停止瞬间还没切出去的尾巴（定稿 + 未定稿）作为最后一块进记录，不翻译
-        if running { flushPendingTail(translate: false) }
+        if wasRunning { flushPendingTail(translate: false) }
         let finalChunks = chunks
         let finalMeetingLocaleIDs = meetingLanguageTimeline.localeIDs
         let summaryEligible = meetingSummaryGeneration == generation && !captionsToExtension
@@ -1807,8 +2001,8 @@ final class CaptionState {
                 self.summaryDiskRevision += 1
                 return
             }
-            self.sessionGen += 1
-            let generation = self.sessionGen
+            self.meetingSummaryRetryGeneration = max(self.sessionGen, self.meetingSummaryRetryGeneration) + 1
+            let generation = self.meetingSummaryRetryGeneration
             self.meetingSummaryGeneration = generation
             self.meetingSummaryRecordID = document.recordID
             self.meetingSummarySnapshot = nil
@@ -1830,8 +2024,10 @@ final class CaptionState {
         }
     }
 
-    private func handle(_ event: TranscriptEvent) {
-        guard running || starting else { return }   // 停止后迟到的事件（finalize 尾巴）不再进管线
+    private func handle(_ event: TranscriptEvent, resultGeneration: Int) {
+        guard TranscriptionResultPolicy.accepts(resultGeneration: resultGeneration, currentGeneration: sessionGen,
+                                                draining: drainingTranscription,
+                                                finished: !running && !starting && !drainingTranscription) else { return }
         guard !paused, !switchingMeetingLanguage else { return }   // 切换期间旧引擎尾巴与新模型下载提示都不进入会议正文
         switch event {
         case .volatile(let t):
@@ -1840,7 +2036,7 @@ final class CaptionState {
             committedEn += (committedEn.isEmpty ? "" : " ") + t.trimmingCharacters(in: .whitespaces)
             volatileEn = ""
             refreshPending()
-            tickChunks()   // 定稿即翻，不等轮询
+            if !drainingTranscription { tickChunks() }   // 收尾只记录，不新发翻译
             trimCommitted()
         case .error(let msg):
             guard running, !paused, restartTask == nil else { return }
@@ -1867,7 +2063,7 @@ final class CaptionState {
                 ) else { return }
                 do {
                     try await engine.start(localeID: localeID) { [weak self] e in
-                        Task { @MainActor in guard let self, self.sessionGen == gen, self.engineEpoch == epoch else { return }; self.handle(e) }
+                        guard let self, self.sessionGen == gen, self.engineEpoch == epoch else { return }; self.handle(e, resultGeneration: gen)
                     }
                     try Task.checkCancellation()
                     guard running, sessionGen == gen else { engine.stop(); return }
@@ -2045,9 +2241,9 @@ final class CaptionState {
             let gen = sessionGen
             Task { @MainActor in
                 let local = await LocalTranslator.shared.translate(text)
-                guard gen == sessionGen else { inflight = max(0, inflight - 1); return }
+                inflight = TranslationCompletionPolicy.remainingInflight(inflight, requestGeneration: gen, currentGeneration: sessionGen)
+                guard gen == sessionGen else { return }
                 if let local, !local.isEmpty {
-                    inflight = max(0, inflight - 1)
                     if let idx = chunks.firstIndex(where: { $0.id == id }) {
                         chunks[idx].zh = local
                         chunks[idx].isDraft = false
@@ -2056,7 +2252,6 @@ final class CaptionState {
                         updateRunningStatus()
                     }
                 } else {
-                    inflight = max(0, inflight - 1)
                     requestTranslationViaProxy(for: id, text: text)   // 本机不行：回落 GPT
                 }
             }
@@ -2120,17 +2315,19 @@ final class CaptionState {
             pause(.payment)
             errorBanner = CaptionBanner(text: tr("需要订阅 Pro 才能继续翻译"), action: .upgrade)
         case .quotaExceeded:
+            guard PlanQuotaPolicy.shouldPauseForQuota(plan: plan),
+                  let key = PlanQuotaPolicy.quotaMessageKey(plan: plan) else { return }
             pause(.quota)
-            errorBanner = CaptionBanner(text: plan == "pro" ? tr("本月 Pro 翻译额度已用完，%@ 重置", resetText) : tr("本周免费额度已用完，%@ 重置", resetText),
-                                        action: plan == "pro" ? nil : .upgrade)   // 已经是 Pro 的人不再被叫去「升级 Pro」
+            errorBanner = CaptionBanner(text: tr(key, resetText), action: .upgrade)
             status = tr("额度已用完 · 仅转写")
         case .freePoolExhausted:
+            guard PlanQuotaPolicy.shouldPauseForQuota(plan: plan) else { return }
             pause(.freePool)
             errorBanner = CaptionBanner(text: tr("今日免费额度已被用完，明天再来，或升级 Pro 不受影响"), action: .upgrade)
             status = tr("免费额度今日用尽 · 仅转写")
         case .rateLimited:
             rateLimitedUntil = Date().addingTimeInterval(4)
-            status = tr("请求太频繁，稍等片刻")
+            status = tr(PlanQuotaPolicy.rateLimitMessageKey)
             DispatchQueue.main.asyncAfter(deadline: .now() + 4.2) { [weak self] in self?.retryFailedChunks() }
         case .network(let msg):
             status = msg
@@ -2249,6 +2446,9 @@ final class CaptionState {
     // 用户点开菜单即预热连接（意图信号），30 秒节流
     private var lastPrewarm: Date?
     func prewarm() {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return }
+#endif
         if let t = lastPrewarm, Date().timeIntervalSince(t) < 30 { return }
         lastPrewarm = Date()
         translator.warmup()
@@ -2257,7 +2457,7 @@ final class CaptionState {
     /// 岛高度分档只改内容尺寸；桌面窗高度由用户拖动调整。
     func applyCaptionGeometry() {
         if supportsIslandSizing {
-            IslandNotchController.shared.resizeToContent()
+            CaptionPanelController.shared.applyWidthSelection()
         }
     }
 }

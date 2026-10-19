@@ -4,6 +4,12 @@
 import Carbon.HIToolbox
 import AppKit
 import IOKit.hid
+import Observation
+
+@Observable
+final class HotkeyDisplayRevision {
+    var value = 0
+}
 
 enum GlobalHotkey {
     enum Mode: String { case doubleCommand, combo }
@@ -24,9 +30,11 @@ enum GlobalHotkey {
 
     /// 当前实际生效的方式（双击 ⌘ 需要权限，没拿到就退回组合键）
     private(set) static var effectiveMode: Mode = .combo
-    /// 菜单/引导里显示用
+    private static let displayRevision = HotkeyDisplayRevision()
+    /// All current-shortcut labels observe this shared revision.
     static var displayText: String {
-        effectiveMode == .doubleCommand ? trAny("双击左 ⌘") : comboDisplay
+        _ = displayRevision.value
+        return effectiveMode == .doubleCommand ? trAny("双击左 ⌘") : comboDisplay
     }
     static var comboDisplay: String {
         var s = ""
@@ -77,12 +85,17 @@ enum GlobalHotkey {
         uninstallDoubleCommand()
 
         if mode == .doubleCommand, inputMonitoringGranted {
-            installDoubleCommand()
-            effectiveMode = .doubleCommand
+            if installDoubleCommand() {
+                effectiveMode = .doubleCommand
+            } else {
+                installCombo()
+                effectiveMode = .combo
+            }
         } else {
             installCombo()
             effectiveMode = .combo
         }
+        displayRevision.value += 1
     }
 
     private static func installCombo() {
@@ -103,7 +116,7 @@ enum GlobalHotkey {
     private static var eventTap: CFMachPort?
     private static var tapSource: CFRunLoopSource?
 
-    private static func installDoubleCommand() {
+    private static func installDoubleCommand() -> Bool {
         let mask: CGEventMask =
             (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue) |
             (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.rightMouseDown.rawValue) |
@@ -119,12 +132,13 @@ enum GlobalHotkey {
                 GlobalHotkey.dirtyDuringPress = true   // ⌘ 按住期间敲键 / 点击 / 滚轮 → 不是纯双击
             }
             return Unmanaged.passUnretained(event)
-        }, userInfo: nil) else { return }
+        }, userInfo: nil) else { return false }
         eventTap = tap
         let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
         tapSource = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        return true
     }
 
     private static func uninstallDoubleCommand() {

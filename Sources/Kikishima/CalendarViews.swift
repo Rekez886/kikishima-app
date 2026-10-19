@@ -11,10 +11,10 @@ struct CalendarMeetingCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(context.title).font(.headline).lineLimit(2)
                 Label(tr("已用于这场会议"), systemImage: "checkmark.circle.fill")
-                    .font(.caption).foregroundStyle(.green)
+                    .font(.caption).foregroundStyle(KKColor.textSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+            .background(KKColor.textPrimary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
         } else if !isRunning {
             GroupBox {
                 VStack(alignment: .leading, spacing: 10) {
@@ -38,25 +38,25 @@ struct CalendarMeetingCard: View {
         case .needsPermission:
             Text(tr("连接 macOS 日历，开会前选择会议，Kikishima 会用标题和参会者姓名准备术语。"))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KKColor.textSecondary)
             Button(tr("允许访问日历")) {
                 Task { await coordinator.requestMacAccess() }
-            }
+            }.buttonStyle(KKLinkButtonStyle())
         case .loading:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text(tr("正在读取会议…")).foregroundStyle(.secondary)
+                Text(tr("正在读取会议…")).foregroundStyle(KKColor.textSecondary)
             }
         case .denied:
             Text(tr("Kikishima 没有日历权限，仍可直接开始字幕。"))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KKColor.textSecondary)
             Button(tr("打开系统设置")) { CalendarSystemSettings.open() }
         case .empty:
             HStack {
                 Text(tr("接下来没有找到会议。"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KKColor.textSecondary)
                 Spacer()
                 Button(tr("刷新")) { Task { await coordinator.refresh(force: true) } }
                     .controlSize(.small)
@@ -75,10 +75,10 @@ struct CalendarMeetingCard: View {
                 Text(context.title).font(.headline).lineLimit(2)
                 Text(timeText(start: context.startDate, end: context.endDate))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KKColor.textSecondary)
                 HStack {
                     Label(tr("已用于这场会议"), systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(KKColor.textSecondary)
                     Spacer()
                     Button(tr("更换会议")) { showingPicker = true }
                     Button(tr("清除"), role: .destructive) { coordinator.clearSelection() }
@@ -98,7 +98,7 @@ struct CalendarMeetingCard: View {
             }
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(KKColor.textSecondary)
     }
 }
 
@@ -137,21 +137,21 @@ struct CalendarMeetingPicker: View {
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: isSelected(candidate) ? "checkmark.circle.fill" : "calendar")
-                                .foregroundStyle(isSelected(candidate) ? .green : .secondary)
+                                .foregroundStyle(KKColor.textSecondary)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(candidate.title).font(.headline)
                                 Text(timeText(start: candidate.startDate, end: candidate.endDate))
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(KKColor.textSecondary)
                                 Text(sourceText(candidate.sources))
                                     .font(.caption2)
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(KKColor.textTertiary)
                             }
                             Spacer()
                         }
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(KKPlainButtonStyle())
                 }
             }
         }
@@ -180,13 +180,13 @@ struct MacCalendarSettingsRow: View {
             }
             Text(tr("macOS 会显示“完全访问”。Kikishima 只读取会议标题、时间和参会者姓名，不会修改你的日历。"))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KKColor.textSecondary)
             if coordinator.authorization(for: .macOS) == .denied
                 || coordinator.authorization(for: .macOS) == .restricted
                 || coordinator.authorization(for: .macOS) == .needsReconnect {
                 Text(tr("请前往：系统设置 > 隐私与安全性 > 日历 > Kikishima"))
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(KKColor.warning)
             }
         }
         .task { await coordinator.refresh(force: false) }
@@ -197,10 +197,11 @@ struct MacCalendarSettingsRow: View {
         switch coordinator.authorization(for: .macOS) {
         case .notDetermined:
             Button(tr("允许访问")) { Task { await coordinator.requestMacAccess() } }
+                .buttonStyle(KKLinkButtonStyle())
                 .disabled(coordinator.isRefreshing || coordinator.isRequestingMacAccess)
         case .authorized:
             Label(tr("已连接"), systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(KKColor.textSecondary)
         case .denied, .restricted:
             Button(tr("打开系统设置")) { CalendarSystemSettings.open() }
         case .needsReconnect:

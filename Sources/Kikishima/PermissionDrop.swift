@@ -55,11 +55,12 @@ private struct DropHintView: View {
                 Text(tr("把 Kikishima 拖进「%@」列表", listName)).font(.system(size: 14, weight: .semibold))
                 Spacer()
                 Button(action: onClose) { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .buttonStyle(KKPlainButtonStyle()).foregroundStyle(KKColor.textSecondary)
+                    .accessibilityLabel(tr("关闭"))
             }
             AppDragItemView(url: appURL)
                 .frame(height: 52)
-            Text(tr("也可以点列表下方的 + 号，在 应用程序 里选 Kikishima。")).font(.caption).foregroundStyle(.secondary)
+            Text(tr("也可以点列表下方的 + 号，在 应用程序 里选 Kikishima。")).font(.caption).foregroundStyle(KKColor.textSecondary)
         }
         .padding(14)
         .frame(width: 440)
@@ -140,7 +141,7 @@ private struct AppDragCard: View {
             Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 32, height: 32).cornerRadius(8)
             Text(url.deletingPathExtension().lastPathComponent).font(.system(size: 15))
             Spacer()
-            Image(systemName: "line.3.horizontal").foregroundStyle(.secondary)
+            Image(systemName: "line.3.horizontal").foregroundStyle(KKColor.textSecondary)
         }
         .padding(8)
         .background(.background.opacity(0.7), in: RoundedRectangle(cornerRadius: 12, style: .continuous))

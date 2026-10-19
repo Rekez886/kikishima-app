@@ -41,16 +41,16 @@ struct GlossarySettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(tr("每行一条。纯词条 = 保留原文（人名、项目名）；「原词 → 译法」= 指定翻译。"))
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(KKColor.textSecondary)
             TextEditor(text: $state.glossary)
                 .font(.system(size: 13, design: .monospaced))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(KKColor.textTertiary.opacity(0.3)))
             // 服务器上限：80 条 / 4000 字，超出的部分不会发送
             let lines = state.glossary.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
             let chars = state.glossary.count
             Text(tr("%@ / 80 条 · %@ / 4000 字", lines, chars))
                 .font(.caption)
-                .foregroundStyle(lines > 80 || chars > 4000 ? .orange : .secondary)
+                .foregroundStyle(lines > 80 || chars > 4000 ? KKColor.warning : KKColor.textSecondary)
         }
         .padding(12)
     }
@@ -61,10 +61,10 @@ struct AboutView: View {
         VStack(spacing: 8) {
             Image(systemName: "captions.bubble.fill").font(.system(size: 40))
             Text("Kikishima").font(.title2.bold())
-            Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "")) — \(tr("本地转写 + AI 翻译的会议实时字幕"))")
-                .font(.caption).foregroundStyle(.secondary)
+            Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "")) · \(tr("本地转写 + AI 翻译的会议实时字幕"))")
+                .font(.caption).foregroundStyle(KKColor.textSecondary)
             Text(privacyStatement)
-                .font(.caption2).foregroundStyle(.tertiary)
+                .font(.caption2).foregroundStyle(KKColor.textTertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
         }

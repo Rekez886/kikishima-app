@@ -11,8 +11,8 @@ struct OnboardingWelcome: View {
             Image(nsImage: Self.icon).resizable().frame(width: 96, height: 96).accessibilityHidden(true)
             Text("Kikishima").font(.system(size: 30, weight: .bold))
             Text(tr("给你参加的每一场线上会议加上实时翻译字幕。\nZoom、Google Meet、Teams，任何出声的应用都可以。"))
-                .font(.system(size: 14)).foregroundStyle(.secondary)
-            Text(privacy).font(.system(size: 11)).foregroundStyle(.secondary)
+                .font(.system(size: 14)).foregroundStyle(KKColor.textSecondary)
+            Text(privacy).font(.system(size: 11)).foregroundStyle(KKColor.textSecondary)
         }
         .multilineTextAlignment(.center)
         .fixedSize(horizontal: false, vertical: true)
@@ -43,14 +43,14 @@ struct LanguageChoiceTile: View {
         Button(action: action) {
             Text(title).font(.system(size: 15, weight: selected ? .semibold : .regular))
                 .frame(maxWidth: .infinity, minHeight: 56)
-                .foregroundStyle(selected ? Color.white : Color.primary)
-                .background(selected ? Color.accentColor : Color(nsColor: .controlBackgroundColor),
+                .foregroundStyle(KKColor.textPrimary)
+                .background(selected ? KKColor.surfaceSelected : KKColor.surfaceRaised,
                             in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.primary.opacity(selected ? 0 : 0.1), lineWidth: 1))
+                    .strokeBorder(KKColor.textPrimary.opacity(selected ? 1 : 0), lineWidth: 1))
                 .contentShape(RoundedRectangle(cornerRadius: 8))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(KKPlainButtonStyle(radius: 8))
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

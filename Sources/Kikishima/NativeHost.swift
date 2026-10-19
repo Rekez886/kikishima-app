@@ -4,7 +4,7 @@ import Foundation
 import AppKit
 
 enum NativeHost {
-    /// 这一版 app 期望的扩展版本（跟 chrome-extension/manifest.json 的 version 同步；release.sh 会校验两者一致）
+    /// 这一版 app 期望的扩展版本（跟 chrome-extension/manifest.json 的 version 同步；发版时需校验两者一致）
     static let expectedExtensionVersion = "1.1.5"
     /// 开发者模式装的 ID（由 chrome-extension/manifest.json 的 key 决定，固定）；商店上架后会多一个商店分配的 ID，
     /// 用 `defaults write com.kikishima.mac chromeStoreExtensionID <id>` 或下面的常量补上，两个都写进白名单

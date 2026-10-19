@@ -17,7 +17,9 @@ extension NSScreen {
     }
 
     var hasNotch: Bool {
-        auxiliaryTopLeftArea?.width != nil && auxiliaryTopRightArea?.width != nil
+        if auxiliaryTopLeftArea != nil && auxiliaryTopRightArea != nil { return true }
+        guard let number = deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }
+        return CGDisplayIsBuiltin(CGDirectDisplayID(number.uint32Value)) != 0 && safeAreaInsets.top > 0
     }
 
     var notchSize: NSSize? {

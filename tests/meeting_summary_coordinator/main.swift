@@ -113,7 +113,7 @@ private func makeCoordinator(
         transcriptURL: URL(fileURLWithPath: "/tmp/meeting-\(generation).md"),
         startedAt: startedAt,
         targetLanguage: "English",
-        aliases: ["Jay"]
+        aliases: ["Ken"]
     )
     return coordinator
 }

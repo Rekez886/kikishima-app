@@ -44,7 +44,7 @@ private func testInvalidCandidatesAreFiltered() {
 private func testExactCrossProviderDuplicatesAreMerged() {
     let input = [
         event(id: "mac", source: .macOS, start: -600, end: 1_800, attendees: ["Mika"]),
-        event(id: "google", source: .google, title: "  DESIGN   REVIEW ", start: -600, end: 1_800, attendees: ["Jay", "mika"]),
+        event(id: "google", source: .google, title: "  DESIGN   REVIEW ", start: -600, end: 1_800, attendees: ["Ken", "mika"]),
     ]
 
     let result = CalendarCandidatePolicy.process(input, now: now, calendar: Calendar(identifier: .gregorian))
@@ -52,7 +52,7 @@ private func testExactCrossProviderDuplicatesAreMerged() {
     precondition(result[0].title == "Design Review")
     precondition(result[0].sources == [.macOS, .google])
     precondition(result[0].providerEventIDs == [.macOS: "mac", .google: "google"])
-    precondition(result[0].attendeeNames == ["Mika", "Jay"], "Attendee names must be unioned without case-only duplicates")
+    precondition(result[0].attendeeNames == ["Mika", "Ken"], "Attendee names must be unioned without case-only duplicates")
 }
 
 private func testOngoingMeetingsRankBeforeFutureAndPastMeetings() {

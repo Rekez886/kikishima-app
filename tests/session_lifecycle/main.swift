@@ -139,11 +139,11 @@ let laptopCaptions = CaptionIslandLayout.notchContentSize(
     visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900), widthFraction: 0.5, height: 148)
 let externalCaptions = CaptionIslandLayout.notchContentSize(
     visibleFrame: CGRect(x: 1440, y: 0, width: 2560, height: 1440), widthFraction: 0.5, height: 148)
-check(laptopCaptions.width == 720, "laptop content uses its host display width")
-check(externalCaptions.width == 1280, "external content uses external width, independent of main screen")
+check(laptopCaptions.width + 30 == 560, "laptop final capsule width is 560pt")
+check(externalCaptions.width + 30 == 560, "external final capsule width is 560pt")
 check(externalCaptions.height == laptopCaptions.height, "display changes preserve selected height")
 check(CaptionIslandLayout.notchContentSize(visibleFrame: CGRect(x: 0, y: 0, width: 240, height: 400),
-    widthFraction: 0.8, height: 100).width == 216, "minimum width never overflows a small host display")
+    widthFraction: 0.8, height: 100).width + 30 == 224, "minimum width never overflows a small host display")
 
 let desktopVisible = CGRect(x: 1440, y: 0, width: 1920, height: 1080)
 let draggedDesktop = CGRect(x: 1700, y: 75, width: 1100, height: 286)

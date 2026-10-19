@@ -27,7 +27,7 @@ func tr(_ key: String, _ args: Any...) -> String {
                     ForEach(0..<3) { variant in
                         VStack(alignment: .leading, spacing: 16) {
                             Text("Kikishima").font(.system(size: 28, weight: .bold))
-                            Text(variant == 0 ? tr("就绪") : tr("暂停字幕")).foregroundStyle(.secondary)
+                            Text(variant == 0 ? tr("就绪") : tr("暂停字幕")).font(.system(size: 13)).foregroundStyle(KKColor.textSecondary)
                             HomeCaptionPreview(source: "Let's review the next steps together.",
                                 translation: HomeCaptionPreview.sampleTranslation(for: lang == "ja" ? "Japanese" : "Simplified Chinese"),
                                 status: tr("暂停字幕"), compact: variant == 0,

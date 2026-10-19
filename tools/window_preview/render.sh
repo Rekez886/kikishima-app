@@ -7,7 +7,7 @@ s = open('Sources/Kikishima/MainWindow.swift').read().split('// MARK: - 记录')
 s = s.replace('import Speech', '')
 open('.build/window-preview/WindowViews.swift', 'w').write(s)
 PY
-swiftc -parse-as-library Sources/Kikishima/BrandIcons.swift Sources/Kikishima/SidebarAccountCard.swift Sources/Kikishima/HomeCaptionPreview.swift Sources/Kikishima/CaptionPreviewText.swift .build/window-preview/WindowViews.swift tools/window_preview/fixtures.swift tools/window_preview/main.swift -o .build/window-preview/render
+swiftc -parse-as-library Sources/Kikishima/DesignTokens.swift Sources/Kikishima/BrandIcons.swift Sources/Kikishima/SidebarAccountCard.swift Sources/Kikishima/HomeCaptionPreview.swift Sources/Kikishima/CaptionPreviewText.swift .build/window-preview/WindowViews.swift tools/window_preview/fixtures.swift tools/window_preview/main.swift -o .build/window-preview/render
 for lang in zh-Hans en ja ko zh-Hant; do
     for theme in light dark; do
         tier=free

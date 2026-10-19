@@ -11,12 +11,12 @@ private func testMapperKeepsOnlyApprovedMeetingFields() {
         isAllDay: false,
         status: .confirmed,
         currentUserStatus: .accepted,
-        attendeeDisplayNames: ["Mika", "", "  Jay  "]
+        attendeeDisplayNames: ["Mika", "", "  Ken  "]
     )
 
     let candidate = MacCalendarEventMapper.map(raw)
     precondition(candidate.title == "Design Review")
-    precondition(candidate.attendeeNames == ["Mika", "Jay"])
+    precondition(candidate.attendeeNames == ["Mika", "Ken"])
     precondition(candidate.sources == [.macOS])
     precondition(candidate.providerEventIDs[.macOS] == "event-1")
     precondition(candidate.sourceCalendarIDs[.macOS] == "cal-1")

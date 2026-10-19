@@ -24,7 +24,7 @@ func tr(_ key: String, _ args: Any...) -> String {
             }
             for dark in [false, true] {
                 let row = HStack(alignment: .top, spacing: 16) {
-                    ForEach(0..<4) { variant in
+                    ForEach(0..<6) { variant in
                         VStack(spacing: 0) {
                             ScrollView {
                                 Group {
@@ -50,24 +50,43 @@ func tr(_ key: String, _ args: Any...) -> String {
                                             TextField(tr("邮箱"), text: .constant("sample@example.com"))
                                                 .textFieldStyle(.roundedBorder)
                                         }.padding(30)
-                                    } else {
+                                    } else if variant == 3 {
                                         VStack(alignment: .leading, spacing: 14) {
                                             Text(tr("可以开会了")).font(.title2.bold())
                                             HomeCaptionPreview(source: "Let's review the next steps together.",
                                                 translation: HomeCaptionPreview.sampleTranslation(for: "Japanese"), status: "",
                                                 compact: true, display: "both", desktop: false, isExample: true)
                                             Text(tr("会议是日语或其他语言？在「打开 Kikishima」里改会议语言。人名、产品名总被翻错？把它们加进术语表。"))
-                                            Button(tr("现在就试一下（开始字幕）")) {}.buttonStyle(.borderedProminent)
+                                            Button(tr("现在就试一下（开始字幕）")) {}.kkPrimaryButton()
+                                        }.padding(30)
+                                    } else if variant == 4 {
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            Text(tr("几项权限")).font(.title2.bold())
+                                            PermissionRow(id: "system-audio", icon: "speaker.wave.2.circle.fill", title: tr("系统音频录制"), required: true,
+                                                why: tr("听到会议里对方的声音。这是唯一途径。"), status: .granted, busy: false, action: {})
+                                            PermissionRow(id: "speech", icon: "waveform.circle.fill", title: tr("语音识别"), required: true,
+                                                why: "", status: .granted, busy: false, action: {})
+                                            PermissionRow(id: "input-monitoring", icon: "command.circle.fill", title: tr("输入监控"), required: false,
+                                                why: "", status: .granted, busy: false, action: {})
+                                        }.padding(30)
+                                    } else {
+                                        VStack(alignment: .leading, spacing: 14) {
+                                            Text(tr("登录")).font(.title2.bold())
+                                            SignInTile(title: tr("使用 Google 登录"), icon: "globe", action: {})
+                                            TextField(tr("邮箱"), text: .constant("sample@example.com"))
+                                                .textFieldStyle(.roundedBorder)
+                                            Button(tr("发送验证码")) {}.kkPrimaryButton()
+                                            Text(tr("登录凭证无效，重试一次")).font(.caption).foregroundStyle(KKColor.error)
                                         }.padding(30)
                                     }
                                 }.frame(maxWidth: .infinity, minHeight: 404)
                             }
                             HStack {
-                                Button(tr("上一步")) {}
+                                Button(tr("上一步")) {}.buttonStyle(KKQuietButtonStyle())
                                 Spacer()
-                                Text("\(variant + 1) / 6").foregroundStyle(.secondary)
+                                Text("\([1, 2, 5, 6, 4, 5][variant]) / 6").font(.caption).foregroundStyle(KKColor.textTertiary)
                                 Spacer()
-                                Button(tr("下一步")) {}.buttonStyle(.borderedProminent)
+                                Button(tr("下一步")) {}.kkPrimaryButton()
                             }.padding(16).background(Color.primary.opacity(0.03))
                         }.frame(width: 540, height: 460)
                             .background(Color(nsColor: .windowBackgroundColor))
@@ -75,7 +94,7 @@ func tr(_ key: String, _ args: Any...) -> String {
                 }.padding(16).environment(\.colorScheme, dark ? .dark : .light)
                 let host = NSHostingView(rootView: row)
                 host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-                let size = NSSize(width: 2240, height: 492)
+                let size = NSSize(width: 3352, height: 492)
                 let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                                       styleMask: [.borderless], backing: .buffered, defer: false)
                 window.isReleasedWhenClosed = false
@@ -90,6 +109,6 @@ func tr(_ key: String, _ args: Any...) -> String {
                 window.close()
             }
         }
-        print("Rendered 4 synthetic onboarding variants in 5 languages, light and dark")
+        print("Rendered 6 synthetic onboarding variants (including granted permissions and failed login) in 5 languages, light and dark")
     }
 }

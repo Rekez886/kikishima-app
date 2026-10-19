@@ -33,11 +33,11 @@ struct SidebarAccountCard: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var isPaid: Bool { summary.tier == .pro }
-    private var brand: Color { Color(red: 1, green: 59.0 / 255, blue: 31.0 / 255) }
+    private var brand: Color { KKColor.brand }
     private var background: Color {
-        if isPaid { return Color(red: 15.0 / 255, green: 15.0 / 255, blue: 15.0 / 255) }
-        if summary.tier == .free { return Color(nsColor: .controlBackgroundColor) }
-        return Color.primary.opacity(0.05)
+        if isPaid { return KKColor.surfaceBase }
+        if summary.tier == .free { return KKColor.surfaceRaised }
+        return KKColor.textPrimary.opacity(0.05)
     }
 
     var body: some View {
@@ -46,10 +46,10 @@ struct SidebarAccountCard: View {
             case .signedOut:
                 Text(tr("未登录")).font(.system(size: 15, weight: .semibold))
                 Text(tr("登录后每周 60 分钟免费翻译字幕。"))
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .font(.system(size: 11)).foregroundStyle(KKColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(tr("登录"), action: login)
-                    .buttonStyle(.borderedProminent).controlSize(.small).tint(.blue)
+                    .kkPrimaryButton().controlSize(.small)
             case .free:
                 if let minutes = summary.remainingMinutes {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -63,24 +63,24 @@ struct SidebarAccountCard: View {
                     Text(tr("免费版")).font(.system(size: 15, weight: .semibold))
                 }
                 Text(tr("每周 60 分钟。升级 Pro 不限时长。"))
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .font(.system(size: 11)).foregroundStyle(KKColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(action: upgrade) {
                     Text(tr("升级 Pro")).font(.system(size: 12, weight: .semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
-                        // Dark ink meets contrast on the approved bright vermilion.
-                        .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                        // Paired foreground follows the adaptive brand background.
+                        .foregroundStyle(KKColor.brandOn)
                         .background(brand, in: RoundedRectangle(cornerRadius: 6))
                 }
-                .buttonStyle(.plain)
-                Text(tr("Pro：$9.99/月 或 $79/年 · 7 天免费试用 · 随时取消"))
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                .buttonStyle(KKPlainButtonStyle())
+                Text(tr("Pro：$4.99/月 或 $39/年 · 7 天免费试用 · 随时取消"))
+                    .font(.system(size: 10)).foregroundStyle(KKColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(action: redeemInvite) {
                     Text(tr("有邀请码？在这里兑换"))
                         .font(.system(size: 11)).multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
-                }.buttonStyle(.link).foregroundStyle(Color.accentColor)
+                }.buttonStyle(KKLinkButtonStyle())
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) {
                         email
@@ -91,40 +91,34 @@ struct SidebarAccountCard: View {
                 }
             case .pro:
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Circle().fill(brand).frame(width: 5, height: 5).accessibilityHidden(true)
+                    Circle().fill(KKColor.textSecondary).frame(width: 5, height: 5).accessibilityHidden(true)
                     Text(summary.paidTitle).font(.system(size: 15, weight: .semibold))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 email
-                if let usage = summary.usageDescription {
-                    Text(usage).font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.68))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Button(action: signOut) {
-                    Text(tr("退出登录")).font(.system(size: 11))
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
-                }.buttonStyle(.plain)
+                logout
             }
         }
-        .foregroundStyle(isPaid ? Color.white : Color.primary)
+        .foregroundStyle(KKColor.textPrimary)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(background, in: RoundedRectangle(cornerRadius: 10))
         .overlay {
             if summary.tier == .free {
                 RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.18 : 0.08), lineWidth: 1)
+                    .strokeBorder(KKColor.textPrimary.opacity(colorScheme == .dark ? 0.18 : 0.08), lineWidth: 1)
             }
         }
     }
 
     private var email: some View {
         Text(summary.email).font(.system(size: 11))
-            .foregroundStyle(isPaid ? Color.white.opacity(0.68) : Color.secondary)
+            .foregroundStyle(KKColor.textSecondary)
             .lineLimit(1).truncationMode(.middle).help(summary.email)
     }
     private var logout: some View {
-        Button(tr("退出登录"), action: signOut).controlSize(.mini).fixedSize()
+        Button(action: signOut) {
+            Text(tr("退出登录")).font(.system(size: 11))
+        }.buttonStyle(KKLinkButtonStyle()).fixedSize()
     }
 }

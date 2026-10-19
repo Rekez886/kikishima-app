@@ -4,11 +4,3 @@ build/
 dist/
 .worktrees/
 .build/
-.env*
-*.p12
-*.p8
-*.pem
-*.cer
-r2.env
-.dev.vars
-*.crx

@@ -24,7 +24,7 @@ struct MeetingSummaryDetailView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         statusView
                         if let document, document.status == .failed || document.status == .interrupted {
-                            Button(tr("重试"), action: onRetry).buttonStyle(.link).disabled(!canRetry)
+                            Button(tr("重试"), action: onRetry).buttonStyle(KKPlainButtonStyle()).foregroundStyle(KKColor.textPrimary).disabled(!canRetry)
                         }
                     }.font(.system(size: 12))
                 }
@@ -32,13 +32,16 @@ struct MeetingSummaryDetailView: View {
                 if let document {
                     summaryContent(document)
                 } else {
-                    ContentUnavailableView(
-                        tr("尚未生成总结"),
-                        systemImage: "list.bullet.clipboard",
-                        description: Text(tr("原始会议记录仍可正常打开。"))
-                    )
+                    ContentUnavailableView {
+                        Label(tr("尚未生成总结"), systemImage: "list.bullet.clipboard")
+                            .foregroundStyle(KKColor.textSecondary)
+                    } description: {
+                        Text(tr("原始会议记录仍可正常打开。"))
+                            .foregroundStyle(KKColor.textSecondary)
+                    }
                 }
             }
+            .foregroundStyle(KKColor.textPrimary)
             .font(.system(size: 13))
             .padding(20)
             .frame(maxWidth: 760, alignment: .leading)
@@ -46,11 +49,11 @@ struct MeetingSummaryDetailView: View {
     }
 
     private var recordDate: some View {
-        Text(transcript.date, style: .date).font(.system(size: 12)).foregroundStyle(.secondary)
+        Text(transcript.date, style: .date).font(.system(size: 12)).foregroundStyle(KKColor.textSecondary)
     }
     private var openRecord: some View {
         Button(tr("打开原始记录")) { NSWorkspace.shared.open(transcript.url) }
-            .buttonStyle(.link).font(.system(size: 12))
+            .buttonStyle(KKLinkButtonStyle()).font(.system(size: 12))
     }
 
     @ViewBuilder
@@ -59,16 +62,16 @@ struct MeetingSummaryDetailView: View {
             switch document.status {
             case .active, .finalizing:
                 Label(tr("正在整理会议要点…"), systemImage: "ellipsis.circle")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KKColor.textSecondary)
             case .failed:
                 Label(tr("总结暂时不可用"), systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(KKColor.warning)
             case .interrupted:
                 Label(tr("总结已中断"), systemImage: "pause.circle")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(KKColor.warning)
             case .finished:
                 Label(tr("会议总结"), systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(KKColor.textSecondary)
             }
         }
     }
@@ -91,7 +94,7 @@ struct MeetingSummaryDetailView: View {
                         if item.owner != nil || item.deadline != nil {
                             Text([item.owner, item.deadline].compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(KKColor.textSecondary)
                                 .padding(.leading, 18)
                         }
                         sourceRefs(item.sourceRefs, document: document)
@@ -154,12 +157,12 @@ struct MeetingSummaryDetailView: View {
                     } label: {
                         Text(tr("来源 %@", formattedTime(ref.startSeconds)))
                             .font(.system(size: 11))
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(KKColor.textPrimary)
                             .padding(.horizontal, 7).padding(.vertical, 4)
-                            .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
+                            .background(KKColor.surfaceRaised, in: RoundedRectangle(cornerRadius: 5))
                             .contentShape(RoundedRectangle(cornerRadius: 5))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(KKPlainButtonStyle())
                     .accessibilityValue(expandedSourceIDs.contains(ref.segmentID) ? tr("已展开") : tr("已收起"))
                 }
             }
@@ -167,10 +170,10 @@ struct MeetingSummaryDetailView: View {
                 if let source = document.sourceIndex[ref.segmentID] {
                     Text(source.text)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KKColor.textSecondary)
                         .textSelection(.enabled)
                         .padding(8)
-                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                        .background(KKColor.textSecondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
                 }
             }
         }

@@ -1,5 +1,5 @@
 // 自动更新：Sparkle 2。检查按钮 / 自动检查开关 / 更新弹窗（版本号 + 更新内容 + 立即或稍后）由 Sparkle 标准 UI 提供
-// appcast: Info.plist SUFeedURL；签名验证：SUPublicEDKey（release.sh 用 sign_update 和钥匙串中的私钥签 DMG）
+// appcast: Info.plist SUFeedURL；签名验证：SUPublicEDKey（发版时用 Sparkle 的 sign_update 和发布者私钥签 DMG）
 import Foundation
 import Sparkle
 

@@ -6,12 +6,12 @@
 	<true/>
 	<key>com.apple.security.personal-information.calendars</key>
 	<true/>
-	<!-- Sign in with Apple：需内嵌带该权利的 Developer ID 描述文件（build.sh 自动判断） -->
+	<!-- Sign in with Apple：需要你自己团队的 Developer ID 描述文件，并把 $(TeamIdentifierPrefix)/$(DEVELOPMENT_TEAM) 换成你的 Team ID；build.sh 不使用本文件 -->
 	<key>com.apple.developer.applesignin</key>
 	<array><string>Default</string></array>
 	<key>com.apple.application-identifier</key>
-	<string>526RV9TVKZ.com.kikishima.mac</string>
+	<string>$(TeamIdentifierPrefix)com.kikishima.mac</string>
 	<key>com.apple.developer.team-identifier</key>
-	<string>526RV9TVKZ</string>
+	<string>$(DEVELOPMENT_TEAM)</string>
 </dict>
 </plist>

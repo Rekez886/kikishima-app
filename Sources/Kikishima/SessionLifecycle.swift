@@ -128,6 +128,9 @@ enum SessionTokenStore {
     private static let account = "session-token"
 
     static func save(_ token: String, defaults: UserDefaults = .standard) {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return }
+#endif
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         let wrote = writeKeychain(trimmed)
         if trimmed.isEmpty || wrote {
@@ -138,6 +141,9 @@ enum SessionTokenStore {
     }
 
     static func load(defaults: UserDefaults = .standard) -> String {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return "" }
+#endif
         let decided = SessionTokenMigration.resolve(
             keychain: readKeychain(),
             defaults: defaults.string(forKey: defaultsKey) ?? ""

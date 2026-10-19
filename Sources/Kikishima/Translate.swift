@@ -133,14 +133,18 @@ final class Translator {
         let msg: String
         if let code {
             switch code {
-            case 401: msg = trAny("API key 无效或已吊销 — 打开设置检查"); onFailure?(.unauthorized)
-            case 429: msg = trAny("翻译服务繁忙或额度不足，稍后再试"); onFailure?(.rateLimited)
+            case 401: msg = trAny("API key 无效或已吊销 · 打开设置检查"); onFailure?(.unauthorized)
+            case 429:
+                let failure = HTTPFailurePolicy.classify(status: code, errorCode: nil)
+                msg = HTTPFailurePolicy.messageKey(status: code, errorCode: nil).map { trAny($0, code) } ?? ""
+                if failure == .rateLimited { onFailure?(.rateLimited) }
+                else { onFailure?(.server(code)) }
             case 500...599: msg = trAny("翻译服务暂时故障（%@），稍后自动恢复", code); onFailure?(.server(code))
             default: msg = trAny("翻译API错误 %@", code); onFailure?(.server(code))
             }
         } else if let e = error as? URLError {
             switch e.code {
-            case .notConnectedToInternet, .networkConnectionLost: msg = trAny("无网络 — 字幕仅转写，恢复联网后自动继续翻译")
+            case .notConnectedToInternet, .networkConnectionLost: msg = trAny("无网络 · 字幕仅转写，恢复联网后自动继续翻译")
             case .timedOut: msg = trAny("翻译请求超时")
             default: msg = trAny("网络错误：%@", e.localizedDescription)
             }
@@ -321,12 +325,22 @@ extension Translator {
                     var raw = ""
                     for try await line in bytes.lines { raw += line; if raw.count > 8192 { break } }   // 网关/WAF 的大 HTML 错误页不无限累积
                     let code = (try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])?["error"] as? String ?? ""
+                    if http.statusCode == 429 {
+                        let failure = HTTPFailurePolicy.classify(status: http.statusCode, errorCode: code)
+                        if let key = HTTPFailurePolicy.messageKey(status: http.statusCode, errorCode: code) {
+                            onStatus?(trAny(key, http.statusCode))
+                        }
+                        switch failure {
+                        case .quotaExceeded: onFailure?(.quotaExceeded)
+                        case .rateLimited: onFailure?(.rateLimited)
+                        case .temporary: onFailure?(.server(http.statusCode))
+                        }
+                        onDone(nil); return
+                    }
                     switch (http.statusCode, code) {
                     case (401, _): onStatus?(trAny("登录已过期，请重新登录")); onFailure?(.unauthorized)
                     case (402, _): onStatus?(trAny("需要订阅 Pro")); onFailure?(.paymentRequired)
-                    case (429, "rate_limited"): onStatus?(trAny("请求太频繁，稍等片刻")); onFailure?(.rateLimited)
-                    case (429, _): onStatus?(trAny("本期翻译额度已用完")); onFailure?(.quotaExceeded)
-                    case (503, "free_pool_exhausted"): onStatus?(trAny("今日免费额度已用完")); onFailure?(.freePoolExhausted)
+                    case (503, "free_pool_exhausted"): onFailure?(.freePoolExhausted)
                     default: onStatus?(trAny("翻译服务错误 %@", http.statusCode)); onFailure?(.server(http.statusCode))
                     }
                     onDone(nil); return
