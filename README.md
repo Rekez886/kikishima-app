@@ -11,7 +11,7 @@ Translation and accounts go through the Kikishima service (`api.kikishima.com`);
 
 ## Download
 
-Latest signed and notarized build: [Kikishima-0.42.dmg](https://downloads.kikishima.com/Kikishima-0.42.dmg). The app updates itself via Sparkle.
+Latest signed and notarized build: [Kikishima-0.43.1.dmg](https://downloads.kikishima.com/Kikishima-0.43.1.dmg). The app updates itself via Sparkle.
 
 ## Requirements
 
@@ -68,7 +68,7 @@ Kikishima（聞き島）は、Mac で再生中の会議音声をリアルタイ�
 
 ### ダウンロード
 
-署名・公証済みの最新ビルド：[Kikishima-0.42.dmg](https://downloads.kikishima.com/Kikishima-0.42.dmg)。アプリは Sparkle で自動アップデートされます。
+署名・公証済みの最新ビルド：[Kikishima-0.43.1.dmg](https://downloads.kikishima.com/Kikishima-0.43.1.dmg)。アプリは Sparkle で自動アップデートされます。
 
 ### 動作環境
 
@@ -106,7 +106,7 @@ Kikishima（聞き島）是一款 macOS 菜单栏应用，把 Mac 上正在播�
 
 ### 下载
 
-已签名、已公证的最新版本：[Kikishima-0.42.dmg](https://downloads.kikishima.com/Kikishima-0.42.dmg)。应用会通过 Sparkle 自动更新。
+已签名、已公证的最新版本：[Kikishima-0.43.1.dmg](https://downloads.kikishima.com/Kikishima-0.43.1.dmg)。应用会通过 Sparkle 自动更新。
 
 ### 系统要求
 

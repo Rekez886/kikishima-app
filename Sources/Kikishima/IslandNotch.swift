@@ -1,23 +1,72 @@
-// 字幕岛：有刘海时从刘海长出；无刘海时同样内容的黑色胶囊位于屏顶下 8pt。
+// 字幕岛：有刘海时从刘海长出；无刘海时同样内容的黑色胶囊位于菜单栏下沿下 8pt。
 // 引擎开关 islandEngine = panel 使用 NSPanel 承载同样的岛内容。
 import SwiftUI
 import AppKit
 import DynamicNotchKit
 import Pow
 import Observation
+import QuartzCore
 
 /// The actual host display is shared by the SwiftUI content and NSPanel policy.
 @MainActor @Observable
 final class IslandDisplayContext {
     var visibleFrame: CGRect = .zero
     var notchWidth: CGFloat = 0
+    var toolbarNotchHeight: CGFloat = 0
     var hostSideInset: CGFloat = 15
+    var measuredHeight: CGFloat = 64
+    var reduceMotion = false
+    private var pendingHeight: CGFloat?
+    private var measurementScheduled = false
+
+    /// Coalesce layout preferences before publishing an integer height. The
+    /// measurement is intrinsic and never depends on the clamped viewport.
+    func measure(_ height: CGFloat) {
+        pendingHeight = ceil(height)
+        guard !measurementScheduled else { return }
+        measurementScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.measurementScheduled = false
+            guard let height = self.pendingHeight else { return }
+            self.pendingHeight = nil
+            if abs(height - self.measuredHeight) >= 1 { self.measuredHeight = height }
+        }
+    }
+}
+
+/// Content shift: 200ms (0.2,0,0,1); Reduce Motion swaps without movement.
+@MainActor
+enum IslandContentShift {
+    static func setFrame(_ frame: NSRect, on window: NSWindow, reduceMotion: Bool) {
+#if SHOOT || DEBUG
+        ShootWindowLog.request(window, to: frame, caller: "content-shift", animate: !reduceMotion)
+#endif
+        guard window.frame != frame else { return }
+        if reduceMotion {
+            window.setFrame(frame, display: true)
+            window.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.1
+                window.animator().alphaValue = 1
+            }
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0, 0, 1)
+                window.animator().setFrame(frame, display: true)
+            }
+        }
+    }
 }
 
 @MainActor
 final class IslandNotchController {
     static let shared = IslandNotchController()
     static var enabled: Bool {
+#if SHOOT
+        if ShootNotch.configuration != nil { return true }
+#endif
 #if SHOOT || DEBUG
         // Use the existing real NSPanel island path; NotchKit forces a dark environment.
         if ShootSimulation.requestedMode != nil { return false }
@@ -74,10 +123,10 @@ final class IslandNotchController {
         if s.islandDormant { s.islandDormant = false }
         dormancyTask?.cancel()
         let secs = s.islandAutoCollapseSeconds
-        guard secs > 0, surfaceVisible, !s.islandSettingsOpen else { return }
+        guard secs > 0 else { return }
         dormancyTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(secs))
-            guard !Task.isCancelled, self.surfaceVisible, !CaptionState.shared.islandSettingsOpen else { return }
+            guard !Task.isCancelled, self.surfaceVisible else { return }
             CaptionState.shared.islandDormant = true
             self.sync()
         }
@@ -92,29 +141,37 @@ final class IslandNotchController {
             applyWindowPolicy()
             return
         }
-        let newContent = expanded ? IslandExpandedView.expandedSize(in: scr.frame) : IslandExpandedView.idleSize(notchWidth: display.notchWidth)
-        let growing = newContent.width > lastContentSize.width + 2 || newContent.height > lastContentSize.height + 2
-        lastContentSize = newContent
-        if growing {
+        let content = expanded
+            ? IslandExpandedView.expandedSize(in: scr.frame, measured: display.measuredHeight)
+            : IslandExpandedView.idleSize(notchWidth: display.notchWidth)
+        let previous = lastContentSize
+        lastContentSize = content
+        if content.width == previous.width {
+            applyWindowPolicy(animateContent: true)
+        } else if content.width > previous.width + 2 {
             applyWindowPolicy()
-            return
-        }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(380))
-            guard gen == self.resizeGen else { return }
-            self.applyWindowPolicy()
+        } else {
+            // Preserve the existing width-shrink timing; only content height
+            // changes use caption.shift.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(380))
+                guard gen == self.resizeGen else { return }
+                self.applyWindowPolicy()
+            }
         }
     }
     private var resizeGen = 0
     private var lastContentSize = CGSize.zero
 
     func hide() {
+#if SHOOT
+        ShootNotch.hide()
+#endif
         guard visible else { return }
         visible = false
         dormancyTask?.cancel()
         dormancyTask = nil
         resizeGen += 1
-        CaptionState.shared.islandSettingsOpen = false
         shown = false
         expanded = false
         CaptionState.shared.islandExpanded = false
@@ -130,6 +187,9 @@ final class IslandNotchController {
         if notch == nil {
             display.visibleFrame = scr.frame
             display.notchWidth = scr.auxiliaryTopLeftArea.flatMap { left in scr.auxiliaryTopRightArea.map { right in CaptionIslandLayout.notchWidth(auxiliaryTopLeft: left, auxiliaryTopRight: right) } } ?? 0
+#if SHOOT
+            if let size = ShootNotch.size(on: scr) { display.notchWidth = size.width }
+#endif
             notch = make()
         }
         guard let n = notch else { return }
@@ -156,34 +216,55 @@ final class IslandNotchController {
 
     /// 和旧岛一致的窗口策略：默认不进屏幕共享；全屏会议上方可见；点击穿透。
     /// NotchKit 的面板默认是半屏宽 × 半屏高的透明窗，会挡住菜单栏弹窗的点击，因此收窄到内容大小
-    func applyWindowPolicy() {
+    func applyWindowPolicy(animateContent: Bool = false) {
         guard let w = notch?.windowController?.window, let scr = w.screen ?? screen() else { return }
-        applyWindowPolicy(to: w, on: scr)
+        applyWindowPolicy(to: w, on: scr, animateContent: animateContent)
     }
 
-    private func applyWindowPolicy(to w: NSWindow, on scr: NSScreen) {
+    private func applyWindowPolicy(to w: NSWindow, on scr: NSScreen, animateContent: Bool = false) {
         display.visibleFrame = scr.frame
         display.notchWidth = scr.auxiliaryTopLeftArea.flatMap { left in scr.auxiliaryTopRightArea.map { right in CaptionIslandLayout.notchWidth(auxiliaryTopLeft: left, auxiliaryTopRight: right) } } ?? 0
+#if SHOOT
+        if let size = ShootNotch.size(on: scr) { display.notchWidth = size.width }
+#endif
         let s = CaptionState.shared
         w.sharingType = s.captionsVisibleInScreenShare ? .readOnly : .none
         w.collectionBehavior.insert(.fullScreenAuxiliary)
-        w.appearance = nil   // 岛永远墨色，不跟系统浅色
+        w.appearance = NSAppearance(named: .darkAqua)   // 岛永远墨色，不跟系统浅色
         w.acceptsMouseMovedEvents = true
         w.ignoresMouseEvents = !expanded   // 只有无操作的胶囊穿透；展开后必须能操作工具条
-        let content = expanded ? IslandExpandedView.expandedSize(in: scr.frame) : IslandExpandedView.idleSize(notchWidth: display.notchWidth)
+        let content = expanded ? IslandExpandedView.expandedSize(in: scr.frame, measured: display.measuredHeight) : IslandExpandedView.idleSize(notchWidth: display.notchWidth)
         lastContentSize = content
-        let notchH = scr.frame.maxY - scr.visibleFrame.maxY   // 菜单栏 / 刘海高度
-        // 两种屏幕都保持刘海内容；无刘海胶囊顶边距屏顶 8pt。
+        var notchH = scr.frame.maxY - scr.visibleFrame.maxY   // 菜单栏 / 刘海高度
+#if SHOOT
+        if let height = ShootNotch.menuBarHeight(on: scr) { notchH = height }
+#endif
+        // 两种屏幕都保持刘海内容；无刘海胶囊顶边距菜单栏下沿 8pt。
         let notchless = !CaptionIslandScreen.hasNotch(scr)
         display.hostSideInset = notchless ? 15 : 30
+        // Match NotchView's existing top safe-area inset, not the caption cap.
+        display.toolbarNotchHeight = notchless ? 0 : scr.safeAreaInsets.top
+#if SHOOT
+        if let size = ShootNotch.size(on: scr) { display.toolbarNotchHeight = size.height }
+#endif
         w.level = .statusBar
+#if SHOOT
+        ShootNotch.show(on: scr, sharingType: w.sharingType, above: w.level)
+#endif
         let size = notchless
-            ? NSSize(width: content.width + 30, height: content.height + 8 + 15)   // 与 NotchlessView 的内边距一致，不留透明边去挡菜单栏
+            ? NSSize(width: content.width + 30, height: CaptionIslandToolbarLayout.floatingWindowHeight(contentHeight: content.height, expanded: expanded))   // 与 NotchlessView 的内边距一致，不留透明边去挡菜单栏
             : NSSize(width: content.width + 30, height: content.height + notchH + 15)
         let frame = notchless
-            ? CaptionScreenPolicy.floatingFrame(screenFrame: scr.frame, size: size)
-            : NSRect(x: scr.frame.midX - size.width / 2, y: scr.frame.maxY - size.height, width: size.width, height: size.height)
-        if w.frame != frame { w.setFrame(frame, display: true) }
+            ? CaptionScreenPolicy.floatingFrame(screenFrame: scr.frame, visibleFrame: scr.visibleFrame, size: size)
+            : CaptionIslandLayout.notchedWindowFrame(screenFrame: scr.frame, notchHeight: notchH, contentSize: content)
+        if animateContent {
+            IslandContentShift.setFrame(frame, on: w, reduceMotion: display.reduceMotion)
+        } else if w.frame != frame {
+#if SHOOT || DEBUG
+            ShootWindowLog.request(w, to: frame, caller: "place", animate: false)
+#endif
+            w.setFrame(frame, display: true)
+        }
     }
 }
 
@@ -196,28 +277,38 @@ struct IslandExpandedView: View {
     static func idleSize(notchWidth: CGFloat) -> CGSize {
         CGSize(width: CaptionIslandLayout.compactWidth(notchWidth: notchWidth) - 30, height: 12) // + host 30 = notch + 2 × 120pt
     }
-    static func expandedSize(in visibleFrame: CGRect) -> CGSize {
-        CaptionIslandLayout.notchContentSize(visibleFrame: visibleFrame,
-            widthFraction: CaptionState.shared.captionWidthFraction,
-            height: IslandExpandedView.contentHeight)
+    static func expandedSize(in visibleFrame: CGRect, measured: CGFloat) -> CGSize {
+        // Both hosts pass screen.frame. Resolve visible dimensions here
+        // so the panel and NotchKit use the same geometry.
+        let screen = NSScreen.screens.first { $0.frame == visibleFrame }
+        var bounds = visibleFrame
+        bounds.size.width = screen?.visibleFrame.width ?? visibleFrame.width
+        bounds.size.height = screen?.visibleFrame.height ?? visibleFrame.height
+        var size = CaptionIslandLayout.notchContentSize(visibleFrame: bounds,
+            widthLevel: CaptionAppearance.parseSize(CaptionState.shared.captionWidthLevel) ?? .medium,
+            heightLevel: IslandExpandedView.contentHeight)
+        size.height = CaptionIslandLayout.islandContentHeight(measured: measured,
+            visibleHeight: bounds.height, heightLevel: contentHeight)
+        return size
     }
-    static var contentHeight: CGFloat {
-        let state = CaptionState.shared
-        let hasPending = !state.pendingEn.isEmpty || !state.pendingDraft.isEmpty
-        let limit = CaptionHierarchy.historyLimit(userSize: state.zhFontSize, showTranslation: state.showTranslation, showSource: state.showSource, banner: state.errorBanner != nil || state.paused)
-        let count = min(limit + 1, state.visibleCaptionChunks.filter { !$0.isMarker }.count + (hasPending ? 1 : 0))
-        let scale = state.zhFontSize / 18
-        let current = (state.showTranslation ? 48.0 : 0) + (state.showSource ? 22.0 : 0)
-        let history = Double(max(0, count - 1)) * CaptionHierarchy.historyLineHeight(showTranslation: state.showTranslation, showSource: state.showSource)
-        let banners = (state.errorBanner != nil || state.paused) ? 40.0 : 0
-        return min(153, max(64, (current + history) * scale + Double(max(0, count - 1)) * 4 + 16 + banners))
+    static var contentHeight: CaptionSizeLevel {
+        // Intrinsic column height is clamped to 64pt and the screen-aware cap.
+        // The selected tier remains the scrolling ceiling, not a fixed viewport.
+        CaptionAppearance.parseSize(CaptionState.shared.islandHeightLevel) ?? .medium
     }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        let baseSize = state.wantsIslandExpanded ? Self.expandedSize(in: display.visibleFrame) : Self.idleSize(notchWidth: display.notchWidth)
-        let size = CGSize(width: baseSize.width + 30 - display.hostSideInset * 2, height: baseSize.height)
+        let baseSize = state.wantsIslandExpanded ? Self.expandedSize(in: display.visibleFrame, measured: display.measuredHeight) : Self.idleSize(notchWidth: display.notchWidth)
+        let size = CGSize(width: baseSize.width + 30 - display.hostSideInset * 2, height: baseSize.height + (state.wantsIslandExpanded ? CaptionIslandToolbarLayout.extraHeight(notchHeight: display.toolbarNotchHeight) : 0))
         ZStack {
             if state.wantsIslandExpanded {
-                CaptionFeedView(state: state, hostedInNotch: true, hostSideInset: display.hostSideInset)
+                CaptionFeedView(state: state, hostedInNotch: true, hostSideInset: display.hostSideInset,
+                                toolbarNotchWidth: display.notchWidth, toolbarNotchHeight: display.toolbarNotchHeight)
+                    .islandLayout(width: baseSize.width + 30,
+                        heightCap: CaptionIslandLayout.expandedContentHeight(
+                            visibleHeight: NSScreen.screens.first { $0.frame == display.visibleFrame }?.visibleFrame.height ?? display.visibleFrame.height,
+                            heightLevel: Self.contentHeight),
+                        onHeight: { display.measure($0) })
                     .transition(.movingParts.blur.combined(with: .opacity))
             } else {
                 // 胶囊：左朱红点、右电平，中间留白——就是设计稿 S1
@@ -230,10 +321,13 @@ struct IslandExpandedView: View {
                 .transition(.movingParts.blur.combined(with: .opacity))
             }
         }
+        .environment(\.colorScheme, .dark)
         .frame(width: size.width, height: size.height)
         .padding(.bottom, state.wantsIslandExpanded ? 0 : -9)   // 胶囊态：吃掉 NotchKit 写死的 15pt 底边留白的一部分
         .animation(.spring(response: 0.48, dampingFraction: 0.86), value: state.wantsIslandExpanded)
-        .animation(.spring(response: 0.36, dampingFraction: 0.9), value: size)
+        .animation(.spring(response: 0.36, dampingFraction: 0.9), value: size.width)
+        .animation(reduceMotion ? nil : .timingCurve(0.2, 0, 0, 1, duration: 0.2), value: size.height)
+        .onChange(of: reduceMotion, initial: true) { display.reduceMotion = reduceMotion }
         .onChange(of: size) { CaptionPanelController.shared.resizeIslandToContent() }
         .onChange(of: state.wantsIslandExpanded) {
             IslandNotchController.shared.sync()
@@ -254,16 +348,22 @@ struct IslandCompactLeading: View {
     var body: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(state.silentTooLong ? KKColor.warning : state.running && !state.paused ? KKColor.brand : KKColor.textTertiary)
+                .fill(state.captionDisplayStatus == .error ? KKColor.error : state.captionDisplayStatus.isWarning ? KKColor.warning : state.captionDisplayStatus == .listening ? KKColor.brand : KKColor.textTertiary)
                 .frame(width: 7, height: 7)
                 .changeEffect(.glow(color: KKColor.brand, radius: 8), value: state.running)
-            if state.silentTooLong {
-                Text(tr("没听到声音")).font(.system(size: 11))
-                    .foregroundStyle(KKColor.warning)
+            if state.captionDisplayStatus.showsLabel {
+                Text(state.captionStatusShortText).font(.system(size: 11))
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help(state.captionStatusText).accessibilityLabel(state.captionStatusText)
+                    .foregroundStyle(state.captionDisplayStatus == .error ? KKColor.error : KKColor.warning)
+            }
+            if let action = state.captionStatusBanner?.action {
+                Button(tr(action.title)) { state.performBanner(action) }
+                    .buttonStyle(KKQuietButtonStyle()).controlSize(.small)
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(state.running ? CaptionListeningStatus.text(silentTooLong: state.silentTooLong, audioStalled: state.audioStalled) : tr("字幕"))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(state.captionDisplayStatus == .idle ? tr("字幕") : state.captionStatusText)
     }
 }
 

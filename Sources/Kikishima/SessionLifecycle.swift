@@ -85,7 +85,18 @@ enum SessionControls {
 
     static let productionAPI = "https://api.kikishima.com"
 
+    #if SANDBOX
+    // Set your own sandbox API URL here; sandbox builds never fall back to production.
+    static let defaultAPI = ""
+    #else
+    static let defaultAPI = productionAPI
+    #endif
+
     static func resolvedAPIBase(_ raw: String) -> String {
+        #if SANDBOX
+        // Every stored value is pinned to this build's server.
+        return defaultAPI
+        #else
         let trimmed = raw.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if trimmed == productionAPI { return productionAPI }
         #if DEBUG
@@ -96,6 +107,7 @@ enum SessionControls {
         }
         #endif
         return productionAPI
+        #endif
     }
 }
 
@@ -122,71 +134,178 @@ enum SessionTokenMigration {
     }
 }
 
-enum SessionTokenStore {
-    static let defaultsKey = "sessionToken"
-    private static let service = "Kikishima"
-    private static let account = "session-token"
+/// Account data is shared with the installed app only by its release bundle.
+/// A debug build with the production bundle ID must still start signed out.
+enum CredentialScope: Equatable {
+    enum Build: String { case release, debug, shoot, sandbox }
+    case production
+    case isolated(Build, bundleID: String?)
+    case disabled
 
-    static func save(_ token: String, defaults: UserDefaults = .standard) {
+    static func resolve(bundleID: String?, build: Build, simulation: Bool) -> Self {
+        if simulation { return .disabled }
+        #if SANDBOX
+        return .isolated(.sandbox, bundleID: bundleID)
+        #else
+        if build == .release, bundleID == "com.kikishima.mac" { return .production }
+        return .isolated(build, bundleID: bundleID)
+        #endif
+    }
+
+    static var current: Self {
 #if SHOOT || DEBUG
-        if ShootSimulation.requestedMode != nil { return }
+        if ShootSimulation.requestedMode != nil { return .disabled }
 #endif
-        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        let wrote = writeKeychain(trimmed)
-        if trimmed.isEmpty || wrote {
-            defaults.removeObject(forKey: defaultsKey)
-        } else if let fallback = SessionTokenMigration.fallbackToDefaults(token: trimmed, keychainWriteSucceeded: wrote) {
-            defaults.set(fallback, forKey: defaultsKey)
-        }
-    }
-
-    static func load(defaults: UserDefaults = .standard) -> String {
-#if SHOOT || DEBUG
-        if ShootSimulation.requestedMode != nil { return "" }
+#if SANDBOX
+        let build = Build.sandbox
+#elseif SHOOT
+        let build = Build.shoot
+#elseif DEBUG
+        let build = Build.debug
+#else
+        let build = Build.release
 #endif
-        let decided = SessionTokenMigration.resolve(
-            keychain: readKeychain(),
-            defaults: defaults.string(forKey: defaultsKey) ?? ""
-        )
-        var wrote = false
-        if let persist = decided.persistKeychain {
-            wrote = writeKeychain(persist)
-        }
-        if SessionTokenMigration.shouldClearDefaults(
-            keychainWriteSucceeded: wrote,
-            keychainAlreadyHeldToken: decided.persistKeychain == nil && decided.clearDefaultsIfPersisted
-        ) {
-            defaults.removeObject(forKey: defaultsKey)
-        }
-        return decided.token
+        return resolve(bundleID: Bundle.main.bundleIdentifier, build: build, simulation: false)
     }
 
-    private static func query() -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
+    private var namespace: String {
+        switch self {
+        case .production: return "production"
+        case .isolated(let build, let bundleID):
+            // Encoding preserves case and separators without filename/key collisions.
+            let identity = bundleID.map { "bundle." + Data($0.utf8).base64EncodedString() } ?? "unbundled"
+            return build.rawValue + "." + identity
+        case .disabled: return "disabled"
+        }
     }
 
-    private static func readKeychain() -> String {
-        var search = query()
+    var keychainService: String { self == .production ? "Kikishima" : "Kikishima.Test." + namespace }
+    func defaultsKey(_ key: String) -> String { self == .production ? key : "account." + namespace + "." + key }
+}
+
+enum AccountPreferences {
+    static func string(forKey key: String, defaults: UserDefaults = .standard,
+                       scope: CredentialScope = .current) -> String? {
+        guard scope != .disabled else { return nil }
+        return defaults.string(forKey: scope.defaultsKey(key))
+    }
+
+    static func set(_ value: String?, forKey key: String, defaults: UserDefaults = .standard,
+                    scope: CredentialScope = .current) {
+        guard scope != .disabled else { return }
+        if let value { defaults.set(value, forKey: scope.defaultsKey(key)) }
+        else { defaults.removeObject(forKey: scope.defaultsKey(key)) }
+    }
+}
+
+/// Injectable so storage regression tests never query a real Keychain.
+struct CredentialKeychain {
+    var read: (_ service: String, _ account: String) -> String
+    var write: (_ service: String, _ account: String, _ value: String) -> Bool
+
+    static let system = CredentialKeychain(read: { service, account in
+        var search = query(service: service, account: account)
         search[kSecReturnData as String] = true
         search[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
         guard SecItemCopyMatching(search as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data else { return "" }
         return String(data: data, encoding: .utf8) ?? ""
+    }, write: { service, account, value in
+        let search = query(service: service, account: account)
+        if value.isEmpty {
+            let status = SecItemDelete(search as CFDictionary)
+            return status == errSecSuccess || status == errSecItemNotFound
+        }
+        let attributes = [kSecValueData as String: Data(value.utf8)]
+        let status = SecItemUpdate(search as CFDictionary, attributes as CFDictionary)
+        if status == errSecSuccess { return true }
+        guard status == errSecItemNotFound else { return false }
+        var add = search
+        add[kSecValueData as String] = Data(value.utf8)
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+    })
+
+    private static func query(service: String, account: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service, kSecAttrAccount as String: account]
+    }
+}
+
+enum SessionTokenStore {
+    static let defaultsKey = "sessionToken"
+    private static let account = "session-token"
+    private static let pendingKey = "sessionTokenPendingWrite"
+    // Summary requests load credentials off the main actor. Serialize complete
+    // read/repair/write transactions with login and sign-out.
+    private static let transactionLock = NSLock()
+
+    static func save(_ token: String, defaults: UserDefaults = .standard,
+                     scope: CredentialScope = .current, keychain: CredentialKeychain = .system) {
+        guard scope != .disabled else { return }
+        transactionLock.lock()
+        defer { transactionLock.unlock() }
+        let key = scope.defaultsKey(defaultsKey)
+        let pending = scope.defaultsKey(pendingKey)
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            // A locked/unavailable Keychain must not resurrect a signed-out
+            // account on the next launch. No token is stored in this marker.
+            defaults.set("signOut", forKey: pending)
+            defaults.removeObject(forKey: key)
+            if keychain.write(scope.keychainService, account, "") { defaults.removeObject(forKey: pending) }
+            return
+        }
+        let wrote = keychain.write(scope.keychainService, account, trimmed)
+        if wrote {
+            defaults.removeObject(forKey: key)
+            defaults.removeObject(forKey: pending)
+        } else if let fallback = SessionTokenMigration.fallbackToDefaults(token: trimmed, keychainWriteSucceeded: wrote) {
+            defaults.set(fallback, forKey: key)
+            // Distinguish an authoritative failed replacement from the stale
+            // legacy fallback, where Keychain must still win during migration.
+            defaults.set("replace", forKey: pending)
+        }
     }
 
-    @discardableResult
-    private static func writeKeychain(_ token: String) -> Bool {
-        SecItemDelete(query() as CFDictionary)
-        guard !token.isEmpty else { return true }
-        var add = query()
-        add[kSecValueData as String] = Data(token.utf8)
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(add as CFDictionary, nil)
-        return status == errSecSuccess || status == errSecDuplicateItem
+    static func load(defaults: UserDefaults = .standard, scope: CredentialScope = .current,
+                     keychain: CredentialKeychain = .system) -> String {
+        guard scope != .disabled else { return "" }
+        transactionLock.lock()
+        defer { transactionLock.unlock() }
+        let key = scope.defaultsKey(defaultsKey)
+        let pending = scope.defaultsKey(pendingKey)
+        if let operation = defaults.string(forKey: pending) {
+            if operation == "signOut" {
+                defaults.removeObject(forKey: key)
+                if keychain.write(scope.keychainService, account, "") { defaults.removeObject(forKey: pending) }
+                return ""
+            }
+            // Malformed or incomplete pending writes fail closed.
+            guard operation == "replace",
+                  let fallback = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !fallback.isEmpty else { return "" }
+            if keychain.write(scope.keychainService, account, fallback) {
+                defaults.removeObject(forKey: key)
+                defaults.removeObject(forKey: pending)
+            }
+            return fallback
+        }
+        let decided = SessionTokenMigration.resolve(
+            keychain: keychain.read(scope.keychainService, account),
+            defaults: defaults.string(forKey: key) ?? ""
+        )
+        var wrote = false
+        if let persist = decided.persistKeychain {
+            wrote = keychain.write(scope.keychainService, account, persist)
+        }
+        if SessionTokenMigration.shouldClearDefaults(
+            keychainWriteSucceeded: wrote,
+            keychainAlreadyHeldToken: decided.persistKeychain == nil && decided.clearDefaultsIfPersisted
+        ) {
+            defaults.removeObject(forKey: key)
+        }
+        return decided.token
     }
 }

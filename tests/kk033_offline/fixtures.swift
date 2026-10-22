@@ -1,0 +1,43 @@
+import Foundation
+func trAny(_ text: String) -> String { text }
+func tr(_ text: String, _ args: CVarArg...) -> String { text + args.map { String(describing: $0) }.joined() }
+struct TranslationTimingMetadata { var row = 0 }
+enum TranslationText { static func acknowledgement(_ text: String) -> String? { nil } }
+enum TranslateFailure: Sendable { case unauthorized, paymentRequired, quotaExceeded, freePoolExhausted, rateLimited, network(String), server(Int), cancelled }
+// EVENT
+// CHUNK
+struct Meter {
+    var audibleTime: TimeInterval = 0
+    func snapshot() -> Meter { self }
+}
+struct Queue { var isEmpty = true; mutating func enqueue(_ id: UUID) { isEmpty = false } }
+@MainActor final class Host {
+    var running = true, starting = false, finishingCaptions = false, paused = false
+    var translationPaused = false, useProxy = true
+    var sessionToken = "fixture", plan = "free", planExpires: String?
+    var sessionGen = 1, resetText = "Monday", status = "running"
+    enum PauseReason { case session, payment, quota, freePool }
+    var pauseReason: PauseReason?, pausedAt: Date?, rateLimitedUntil: Date?
+    var meter = Meter()
+    var chunks: [CaptionChunk] = []
+    var activeTranslationAttempts: [UUID: UUID] = [:]
+    var switchingMeetingLanguage = false
+    var silentTooLong = false, audioStalled = false
+    var lastFinalMs = 0
+    var translationRetryQueue = Queue()
+    func pushChunk(_ chunk: CaptionChunk, index: Int) {}
+    func updateRunningStatus() { status = "running" }
+    func queueTranslatedChunksForMeetingSummary() {}
+    func scheduleTranscriptSave() {}
+    func retryFailedChunks() {}
+    // PROPERTIES
+    // METHODS
+    func tick(_ audioTime: Double) { meter.audibleTime = audioTime; updateTranslationConnectivity() }
+    func success() { translationSucceeded() }
+    func finish(_ final: String?, idx: Int) {
+        let id = chunks[idx].id
+        // COMPLETION
+    }
+    var visibleStatus: CaptionBanner? { desktopErrorStatus ?? offlineStatus }
+}
+struct DisplayState { var running = true; var starting = false; var finishingCaptions = false; var translationPaused = false; var showTranslation = true, showSource = false, compactCaptions = true }

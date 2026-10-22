@@ -28,6 +28,13 @@ const S = {
     google: 'Google로 로그인', apple: 'Apple로 로그인', orEmail: '또는 이메일 인증 코드 사용', failed: '로그인에 실패했습니다. 다시 시도하세요' },
 };
 const t = S[KikiReliability.uiLanguage(navigator.language)] || S.en;
+const billingText = {
+  'zh-Hans': ['管理订阅', '恢复购买', '订阅服务暂时不可用，请稍后重试', '未找到与当前账号绑定的购买，请确认账号或联系支持'],
+  'zh-Hant': ['管理訂閱', '恢復購買', '訂閱服務暫時無法使用，請稍後再試', '找不到與目前帳號綁定的購買，請確認帳號或聯絡支援'],
+  ja: ['契約を管理', '購入を復元', 'サブスクリプションサービスを利用できません。時間をおいてお試しください', 'このアカウントの購入が見つかりません。アカウントを確認するかサポートにお問い合わせください'],
+  en: ['Manage subscription', 'Restore purchases', 'Subscription service unavailable. Please try again later.', 'No purchase is linked to this account. Check your account or contact support.'],
+  ko: ['구독 관리', '구매 복원', '구독 서비스를 사용할 수 없습니다. 나중에 다시 시도하세요.', '이 계정에 연결된 구매가 없습니다. 계정을 확인하거나 지원팀에 문의하세요.'],
+}[KikiReliability.uiLanguage(navigator.language)] || ['Manage subscription', 'Restore purchases', 'Subscription service unavailable. Please try again later.', 'No purchase is linked to this account. Check your account or contact support.'];
 
 const get = (keys) => new Promise((r) => chrome.storage.local.get(keys, (v) => r(v || {})));
 const set = (obj) => new Promise((r) => chrome.storage.local.set(obj, () => r()));
@@ -73,9 +80,13 @@ async function render() {
     }
     if (plan !== 'pro') {
       acc.appendChild(make('div', { className: 'row' }, [
-        make('a', { href: 'https://buy.polar.sh/polar_cl_5YfqHr8odzwwxcyVuttv1KGCdDrT82PgloJ6q41aKkh' + (accountEmail ? '?customer_email=' + encodeURIComponent(accountEmail) : ''), target: '_blank', textContent: t.upgrade }),
+        make('button', { textContent: t.upgrade, onclick: () => billing('checkout', session) }),
       ]));
     }
+    acc.appendChild(make('div', { className: 'row' }, [
+      make('button', { className: 'ghost', textContent: billingText[0], onclick: () => billing('portal', session) }),
+      make('button', { className: 'ghost', textContent: billingText[1], onclick: () => billing('refresh', session) }),
+    ]));
     return;
   }
 
@@ -143,16 +154,20 @@ async function render() {
   }
 }
 
-async function refreshUsage() {
-  const { session } = await get(['session']);
-  if (!session) return;
-  try {
-    const me = await api('/me', null, session);
-    await set({ plan: me.plan, usage: { tokens: me.tokens, quota: me.quota }, accountEmail: me.email || undefined });
-    render();
-  } catch (e) {
-    if (String(e.message) === 'unauthorized') { await set({ session: '', plan: '' }); render(); }
-  }
+function refreshUsage() {
+  chrome.runtime.sendMessage({ type: 'me' }, () => { void chrome.runtime.lastError; render(); });
+}
+
+function billing(action, session) {
+  document.getElementById('account').querySelectorAll('button').forEach(b => { b.disabled = true; });
+  chrome.runtime.sendMessage({ type: 'billing', action }, async result => {
+    void chrome.runtime.lastError;
+    if ((await get(['session'])).session !== session) return;
+    await render();
+    if (!result || result.error) document.getElementById('account').appendChild(make('div', {
+      className: 'warn', textContent: billingText[result?.error === 'billing_not_linked' ? 3 : 2],
+    }));
+  });
 }
 
 document.getElementById('toggle').onclick = async () => {

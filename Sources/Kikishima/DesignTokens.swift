@@ -2,13 +2,16 @@ import SwiftUI
 import AppKit
 
 /// Build-spec §2.1: adaptive app chrome colors (kk.color.*).
-/// Caption surfaces use the same system appearance as the host.
+/// Desktop captions follow the system; islands always use the dark palette.
 enum KKColor {
     static let surfaceBase = adaptive("kk.color.surface.base", dark: 0x151515, light: 0xFFFFFF)
     static let textSecondary = adaptive("kk.color.text.secondary", dark: 0xA6A6A6, light: 0x6B6B70)
-    static let notchBackground = adaptive("kk.color.notch.bg", dark: 0x000000, light: 0xFFFFFF)
+    static let notchBackground = adaptive("kk.color.notch.bg", dark: 0x000000, light: 0x000000)
+    // Preserve the desktop caption background from before notch.bg became fixed black.
+    static let captionWindowBackground = adaptive("kk.color.caption.window.bg", dark: 0x000000, light: 0xFFFFFF)
     static let historyInk = adaptive("kk.color.caption.history.ink", dark: 0xFFFFFF, light: 0x1A1A1C)
     static let historyFloor = adaptive("kk.color.caption.history.floor", dark: 0x808080, light: 0x808080)
+    static let captionVisibilityBorder = adaptive("kk.color.caption.visibility.border", dark: 0x7A7A7E, light: 0x858589)
     static let borderSubtle = adaptive("kk.color.border.subtle", dark: 0xFFFFFF, light: 0x000000).opacity(0.08)
     static let error = adaptive("kk.color.status.error", dark: 0xFF6B6B, light: 0xC62828)
     static let surfaceRaised = adaptive("kk.color.surface.raised", dark: 0x202123, light: 0xF7F7F8)
@@ -43,7 +46,7 @@ enum CaptionOpacityPolicy {
     }
 }
 
-enum KKRadius { static let md: CGFloat = 8 } // kk.radius.md
+enum KKRadius { static let sm: CGFloat = 6; static let md: CGFloat = 8 } // kk.radius.md
 
 enum KKSpace {
     static let two: CGFloat = 8 // kk.space.2
@@ -667,6 +670,9 @@ final class KKMenuFocusView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         window?.setAccessibilityIdentifier("kk-menu-panel")
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedOpenMenu, let window { ShootOpenMenu.shared.attached(window) }
+#endif
         if presented { activate() }
     }
     private func activate() {
@@ -676,6 +682,12 @@ final class KKMenuFocusView: NSView {
             guard let self else { return }
             self.pending = false
             guard self.presented, let window = self.window else { return }
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedOpenMenu {
+                ShootOpenMenu.shared.attached(window)
+                return // Session owner anchors and activates with bounded retries.
+            }
+#endif
             if let panel = window as? NSPanel { panel.becomesKeyOnlyIfNeeded = false }
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)

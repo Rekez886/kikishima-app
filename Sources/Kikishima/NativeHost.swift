@@ -143,7 +143,11 @@ enum NativeHost {
 
     /// 一批字幕行 → 服务器 /translate/batch（SSE）。每收到一行就 emit 一条 {id, i, t}，收完 emit {id, done}
     private static func translate(lines: [String], target: String, token: String, defaults d: UserDefaults, id: Any, from: Int = 0) {
-        let base = (d.string(forKey: "proxyURL") ?? "https://api.kikishima.com").trimmingCharacters(in: .init(charactersIn: "/"))
+        #if SANDBOX
+        let base = SessionControls.resolvedAPIBase(d.string(forKey: "proxyURL") ?? SessionControls.defaultAPI)
+        #else
+        let base = (d.string(forKey: "proxyURL") ?? SessionControls.defaultAPI).trimmingCharacters(in: .init(charactersIn: "/"))
+        #endif
         guard let url = URL(string: base + "/translate/batch") else { emit(["id": id, "error": "bad_url"]); return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"

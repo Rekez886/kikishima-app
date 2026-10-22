@@ -66,6 +66,12 @@ struct SummarizeRequest: Codable, Equatable, Sendable {
     var final: Bool
     var schemaVersion: Int
     var promptVersion: String
+    // Local correlation only. The strict server JSON schema and idempotency
+    // body stay unchanged; this random UUID travels in a separate header.
+    var costSessionID: String? = nil
+    enum CodingKeys: String, CodingKey {
+        case requestID, previous, previousSourceIDs, segments, targetLanguage, aliases, final, schemaVersion, promptVersion
+    }
 }
 
 struct SummarizeResponse: Codable, Equatable, Sendable {

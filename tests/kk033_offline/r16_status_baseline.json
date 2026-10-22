@@ -1,0 +1,777 @@
+[
+  {
+    "language": "zh-Hans",
+    "full": "登录已过期，重新登录后继续翻译",
+    "short": "登录过期"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "已退出登录，字幕只显示原文；登录后继续翻译",
+    "short": "仅原文"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "音频仍无法捕获：100",
+    "short": "采音失败"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "无法继续：100",
+    "short": "无法继续"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "启动失败：100",
+    "short": "启动失败"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "输出设备切换后无法继续捕获音频：100",
+    "short": "采音失败"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "转写引擎反复中断：100",
+    "short": "字幕中断"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "转写引擎中断：100",
+    "short": "字幕中断"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "需要订阅 Pro 才能继续翻译",
+    "short": "仅原文"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "今日免费额度已被用完，明天再来，或升级 Pro 不受影响",
+    "short": "仅原文"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "本周免费额度已用完，100 重置",
+    "short": "仅原文"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "邀请码已兑换，账号已升级 Pro",
+    "short": "Pro 已开通"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "已停止采音，正在完成最后一句…",
+    "short": "收尾中"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "上一次启动还在收尾，请稍后再试",
+    "short": "收尾中"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "下载转写模型 100%",
+    "short": "下载中 100%"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "输出设备已切换，继续字幕",
+    "short": "设备已切换"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "已停止 · 记录已存 100",
+    "short": "已保存"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "已停止 · 记录保存失败: 100",
+    "short": "保存失败"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "额度已用完 · 仅转写",
+    "short": "仅原文"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "免费额度今日用尽 · 仅转写",
+    "short": "仅原文"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "没有可存的帧（气泡模式开着且会议窗口在吗？）",
+    "short": "无可存画面"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "已暂停 · 声音不再记录",
+    "short": "已暂停"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "请求太频繁，稍等片刻",
+    "short": "请求过频"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "离线，正在重连",
+    "short": "重连中"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "没有「系统录音」权限，听不到会议声音。系统设置 › 隐私与安全性 › 屏幕录制与系统录音 里允许 Kikishima。",
+    "short": "缺录音权限"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "开发令牌已启用",
+    "short": "开发令牌启用"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "正在切换为100…",
+    "short": "切换中"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "转写重连中…",
+    "short": "重连中"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "快照已存 100",
+    "short": "已保存"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "音频中断，正在恢复",
+    "short": "音频恢复中"
+  },
+  {
+    "language": "zh-Hans",
+    "full": "没有输出设备，听不到会议声音",
+    "short": "无输出设备"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "登入已過期，重新登入後繼續翻譯",
+    "short": "登入過期"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "已登出，字幕只顯示原文；登入後繼續翻譯",
+    "short": "僅原文"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "音訊仍無法擷取：100",
+    "short": "收音失敗"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "無法繼續：100",
+    "short": "無法繼續"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "啟動失敗：100",
+    "short": "啟動失敗"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "輸出裝置切換後無法繼續擷取音訊：100",
+    "short": "收音失敗"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "轉寫引擎反覆中斷：100",
+    "short": "字幕中斷"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "轉寫引擎中斷：100",
+    "short": "字幕中斷"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "需要訂閱 Pro 才能繼續翻譯",
+    "short": "僅原文"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "今日免費額度已被用完，明天再來，或升級 Pro 不受影響",
+    "short": "僅原文"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "本週免費額度已用完，100 重設",
+    "short": "僅原文"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "邀請碼已兌換，帳號已升級 Pro",
+    "short": "Pro 已開通"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "已停止收音，正在完成最後一句…",
+    "short": "收尾中"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "上一次啟動還在收尾，請稍後再試",
+    "short": "收尾中"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "下載轉寫模型 100%",
+    "short": "下載中 100%"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "輸出裝置已切換，繼續字幕",
+    "short": "裝置已切換"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "已停止 · 記錄已存 100",
+    "short": "已儲存"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "已停止 · 記錘儲存失敗: 100",
+    "short": "儲存失敗"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "額度已用完 · 僅轉寫",
+    "short": "僅原文"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "免費額度今日用盡 · 僅轉寫",
+    "short": "僅原文"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "沒有可存的幀（氣泡模式開著且會議視窗在嗎？）",
+    "short": "無可存畫面"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "已暫停 · 聲音不再記錄",
+    "short": "已暫停"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "請求太頻繁，稍等片刻",
+    "short": "請求過頻"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "離線，正在重新連線",
+    "short": "重連中"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "沒有「系統錄音」權限，聽不到會議聲音。系統設定 › 隱私權與安全性 › 螢幕錄製與系統錄音 裡允許 Kikishima。",
+    "short": "缺錄音權限"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "開發令牌已啟用",
+    "short": "開發權杖啟用"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "正在切換為100…",
+    "short": "切換中"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "轉寫重連中…",
+    "short": "重連中"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "快照已存 100",
+    "short": "已儲存"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "音訊中斷，正在恢復",
+    "short": "音訊恢復中"
+  },
+  {
+    "language": "zh-Hant",
+    "full": "沒有輸出裝置，聽不到會議聲音",
+    "short": "無輸出裝置"
+  },
+  {
+    "language": "ja",
+    "full": "ログインの期限が切れました。再ログインで翻訳を再開",
+    "short": "認証切れ"
+  },
+  {
+    "language": "ja",
+    "full": "ログアウトしました。字幕は原文のみ。ログインすると翻訳を再開",
+    "short": "原文のみ"
+  },
+  {
+    "language": "ja",
+    "full": "音声をまだ取得できません：100",
+    "short": "音声エラー"
+  },
+  {
+    "language": "ja",
+    "full": "再開できません：100",
+    "short": "再開不可"
+  },
+  {
+    "language": "ja",
+    "full": "起動に失敗：100",
+    "short": "起動失敗"
+  },
+  {
+    "language": "ja",
+    "full": "出力デバイス切り替え後に音声を取得できません：100",
+    "short": "音声エラー"
+  },
+  {
+    "language": "ja",
+    "full": "音声認識エンジンが繰り返し中断：100",
+    "short": "字幕停止"
+  },
+  {
+    "language": "ja",
+    "full": "音声認識エンジンが中断：100",
+    "short": "字幕停止"
+  },
+  {
+    "language": "ja",
+    "full": "翻訳を続けるにはProの契約が必要です",
+    "short": "原文のみ"
+  },
+  {
+    "language": "ja",
+    "full": "本日の無料枠は使い切られました。明日また、またはProなら制限なし",
+    "short": "原文のみ"
+  },
+  {
+    "language": "ja",
+    "full": "今週の無料枠を使い切りました。100にリセット",
+    "short": "原文のみ"
+  },
+  {
+    "language": "ja",
+    "full": "招待コードを適用しました。Proになりました",
+    "short": "Pro有効"
+  },
+  {
+    "language": "ja",
+    "full": "音声の取得を停止しました。最後の字幕を処理中…",
+    "short": "仕上げ中"
+  },
+  {
+    "language": "ja",
+    "full": "前回の起動処理が終わるまで待ってからもう一度",
+    "short": "仕上げ中"
+  },
+  {
+    "language": "ja",
+    "full": "音声認識モデルをダウンロード中 100%",
+    "short": "ダウンロード 100%"
+  },
+  {
+    "language": "ja",
+    "full": "出力デバイスを切り替えました。字幕を継続",
+    "short": "出力切替済み"
+  },
+  {
+    "language": "ja",
+    "full": "停止 · 記録を保存しました 100",
+    "short": "保存済み"
+  },
+  {
+    "language": "ja",
+    "full": "停止 · 記録の保存に失敗: 100",
+    "short": "保存失敗"
+  },
+  {
+    "language": "ja",
+    "full": "翻訳枠を使い切りました · 文字起こしのみ",
+    "short": "原文のみ"
+  },
+  {
+    "language": "ja",
+    "full": "本日の無料枠終了 · 文字起こしのみ",
+    "short": "原文のみ"
+  },
+  {
+    "language": "ja",
+    "full": "保存できるフレームがありません（吹き出しモードがオンで会議画面がありますか？）",
+    "short": "保存画像なし"
+  },
+  {
+    "language": "ja",
+    "full": "一時停止中 · 音声は記録されません",
+    "short": "一時停止中"
+  },
+  {
+    "language": "ja",
+    "full": "リクエストが多すぎます。少しお待ちください",
+    "short": "リクエスト過多"
+  },
+  {
+    "language": "ja",
+    "full": "オフライン、再接続中",
+    "short": "再接続中"
+  },
+  {
+    "language": "ja",
+    "full": "「システム音声の収録」が許可されていないため会議の音が聞けません。システム設定 › プライバシーとセキュリティ › 画面収録とシステム音声の収録 でKikishimaを許可してください。",
+    "short": "録音未許可"
+  },
+  {
+    "language": "ja",
+    "full": "開発トークンを有効化",
+    "short": "開発トークン有効"
+  },
+  {
+    "language": "ja",
+    "full": "100に切り替えています…",
+    "short": "切替中"
+  },
+  {
+    "language": "ja",
+    "full": "音声認識を再接続中…",
+    "short": "再接続中"
+  },
+  {
+    "language": "ja",
+    "full": "スナップショットを保存 100",
+    "short": "保存済み"
+  },
+  {
+    "language": "ja",
+    "full": "音声が中断しました。復旧中です",
+    "short": "音声復旧中"
+  },
+  {
+    "language": "ja",
+    "full": "出力機器がなく、会議音声を聞けません",
+    "short": "出力なし"
+  },
+  {
+    "language": "en",
+    "full": "Session expired. Sign in again to resume translation",
+    "short": "Expired"
+  },
+  {
+    "language": "en",
+    "full": "Signed out. Captions show source only; sign in to resume translation",
+    "short": "Source only"
+  },
+  {
+    "language": "en",
+    "full": "Still can't capture audio: 100",
+    "short": "Audio error"
+  },
+  {
+    "language": "en",
+    "full": "Couldn't resume: 100",
+    "short": "Start failed"
+  },
+  {
+    "language": "en",
+    "full": "Failed to start: 100",
+    "short": "Start failed"
+  },
+  {
+    "language": "en",
+    "full": "Couldn't capture audio after the output device changed: 100",
+    "short": "Audio error"
+  },
+  {
+    "language": "en",
+    "full": "Speech engine keeps failing: 100",
+    "short": "Stopped"
+  },
+  {
+    "language": "en",
+    "full": "Speech engine interrupted: 100",
+    "short": "Stopped"
+  },
+  {
+    "language": "en",
+    "full": "A Pro subscription is required to keep translating",
+    "short": "Source only"
+  },
+  {
+    "language": "en",
+    "full": "Today's free pool is exhausted. Come back tomorrow, or upgrade to Pro (unaffected)",
+    "short": "Source only"
+  },
+  {
+    "language": "en",
+    "full": "This week's free minutes are used up. Resets 100",
+    "short": "Source only"
+  },
+  {
+    "language": "en",
+    "full": "Invite code redeemed: your account is now Pro",
+    "short": "Pro activated"
+  },
+  {
+    "language": "en",
+    "full": "Audio capture stopped. Finishing the last captions…",
+    "short": "Finishing"
+  },
+  {
+    "language": "en",
+    "full": "Previous start is still finishing. Try again in a moment.",
+    "short": "Finishing"
+  },
+  {
+    "language": "en",
+    "full": "Downloading speech model 100%",
+    "short": "Download 100%"
+  },
+  {
+    "language": "en",
+    "full": "Output device changed, captions continue",
+    "short": "Output switched"
+  },
+  {
+    "language": "en",
+    "full": "Stopped · transcript saved 100",
+    "short": "Saved"
+  },
+  {
+    "language": "en",
+    "full": "Stopped · failed to save transcript: 100",
+    "short": "Save failed"
+  },
+  {
+    "language": "en",
+    "full": "Quota used up · transcription only",
+    "short": "Source only"
+  },
+  {
+    "language": "en",
+    "full": "Free pool exhausted today · transcription only",
+    "short": "Source only"
+  },
+  {
+    "language": "en",
+    "full": "No frame to save (is Bubble mode on and a meeting window present?)",
+    "short": "No frame to save"
+  },
+  {
+    "language": "en",
+    "full": "Paused · audio is not being captured",
+    "short": "Paused"
+  },
+  {
+    "language": "en",
+    "full": "Too many requests, hold on a moment",
+    "short": "Rate limited"
+  },
+  {
+    "language": "en",
+    "full": "Offline, reconnecting",
+    "short": "Reconnecting"
+  },
+  {
+    "language": "en",
+    "full": "No System Audio Recording permission, so meetings can't be heard. Allow Kikishima in System Settings › Privacy & Security › Screen & System Audio Recording.",
+    "short": "No access"
+  },
+  {
+    "language": "en",
+    "full": "Dev token enabled",
+    "short": "Dev token on"
+  },
+  {
+    "language": "en",
+    "full": "Switching to 100…",
+    "short": "Switching"
+  },
+  {
+    "language": "en",
+    "full": "Reconnecting speech engine…",
+    "short": "Reconnecting"
+  },
+  {
+    "language": "en",
+    "full": "Snapshot saved 100",
+    "short": "Saved"
+  },
+  {
+    "language": "en",
+    "full": "Audio interrupted, recovering",
+    "short": "Audio recovering"
+  },
+  {
+    "language": "en",
+    "full": "No output device, so meeting audio cannot be heard",
+    "short": "No output"
+  },
+  {
+    "language": "ko",
+    "full": "세션 만료. 다시 로그인하면 번역 재개",
+    "short": "로그인 만료"
+  },
+  {
+    "language": "ko",
+    "full": "로그아웃됨. 자막은 원문만 표시. 로그인하면 번역 재개",
+    "short": "원문만 표시"
+  },
+  {
+    "language": "ko",
+    "full": "여전히 오디오를 캡처할 수 없습니다: 100",
+    "short": "오디오 오류"
+  },
+  {
+    "language": "ko",
+    "full": "재개할 수 없음: 100",
+    "short": "재개 불가"
+  },
+  {
+    "language": "ko",
+    "full": "시작 실패: 100",
+    "short": "시작 실패"
+  },
+  {
+    "language": "ko",
+    "full": "출력 장치 변경 후 오디오를 캡처할 수 없습니다: 100",
+    "short": "오디오 오류"
+  },
+  {
+    "language": "ko",
+    "full": "음성 엔진이 반복 중단: 100",
+    "short": "자막 중단"
+  },
+  {
+    "language": "ko",
+    "full": "음성 엔진 중단: 100",
+    "short": "자막 중단"
+  },
+  {
+    "language": "ko",
+    "full": "번역을 계속하려면 Pro 구독이 필요합니다",
+    "short": "원문만 표시"
+  },
+  {
+    "language": "ko",
+    "full": "오늘의 무료 한도가 소진되었습니다. 내일 다시 오거나 Pro로 업그레이드(영향 없음)",
+    "short": "원문만 표시"
+  },
+  {
+    "language": "ko",
+    "full": "이번 주 무료 시간을 모두 사용했습니다. 100 초기화",
+    "short": "원문만 표시"
+  },
+  {
+    "language": "ko",
+    "full": "초대 코드가 적용되어 Pro로 업그레이드되었습니다",
+    "short": "Pro 활성화"
+  },
+  {
+    "language": "ko",
+    "full": "오디오 캡처를 멈췄습니다. 마지막 자막을 마무리하는 중…",
+    "short": "마무리 중"
+  },
+  {
+    "language": "ko",
+    "full": "이전 시작이 마무리될 때까지 기다렸다가 다시 시도하세요",
+    "short": "마무리 중"
+  },
+  {
+    "language": "ko",
+    "full": "음성 모델 다운로드 중 100%",
+    "short": "다운로드 중 100%"
+  },
+  {
+    "language": "ko",
+    "full": "출력 장치 변경됨, 자막 계속",
+    "short": "출력 전환됨"
+  },
+  {
+    "language": "ko",
+    "full": "중지됨 · 기록 저장됨 100",
+    "short": "저장 완료"
+  },
+  {
+    "language": "ko",
+    "full": "중지됨 · 기록 저장 실패: 100",
+    "short": "저장 실패"
+  },
+  {
+    "language": "ko",
+    "full": "한도 소진 · 전사만",
+    "short": "원문만 표시"
+  },
+  {
+    "language": "ko",
+    "full": "오늘 무료 한도 소진 · 전사만",
+    "short": "원문만 표시"
+  },
+  {
+    "language": "ko",
+    "full": "저장할 프레임이 없습니다(말풍선 모드가 켜져 있고 회의 창이 있나요?)",
+    "short": "저장할 화면 없음"
+  },
+  {
+    "language": "ko",
+    "full": "일시 정지 · 오디오가 기록되지 않습니다",
+    "short": "일시 정지"
+  },
+  {
+    "language": "ko",
+    "full": "요청이 너무 많습니다. 잠시 기다려 주세요",
+    "short": "요청 과다"
+  },
+  {
+    "language": "ko",
+    "full": "오프라인, 다시 연결 중",
+    "short": "재연결 중"
+  },
+  {
+    "language": "ko",
+    "full": "시스템 오디오 기록 권한이 없어 회의 소리를 들을 수 없습니다. 시스템 설정 › 개인 정보 보호 및 보안 › 화면 및 시스템 오디오 기록에서 Kikishima를 허용하세요.",
+    "short": "권한 없음"
+  },
+  {
+    "language": "ko",
+    "full": "개발 토큰 활성화됨",
+    "short": "개발 토큰 활성"
+  },
+  {
+    "language": "ko",
+    "full": "100(으)로 전환 중…",
+    "short": "전환 중"
+  },
+  {
+    "language": "ko",
+    "full": "음성 엔진 재연결 중…",
+    "short": "재연결 중"
+  },
+  {
+    "language": "ko",
+    "full": "스냅샷 저장됨 100",
+    "short": "저장 완료"
+  },
+  {
+    "language": "ko",
+    "full": "오디오가 중단되어 복구 중입니다",
+    "short": "오디오 복구 중"
+  },
+  {
+    "language": "ko",
+    "full": "출력 장치가 없어 회의 소리를 들을 수 없습니다",
+    "short": "출력 없음"
+  }
+]

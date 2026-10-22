@@ -129,7 +129,7 @@ def audit(sources):
     assert '.underline()' not in sidebar and '.underline()' not in main
     # Check the exact Button modifier chain, including multiline actions/labels.
     for name, titles in {
-        'MainWindow.swift': ['更多语言…', '刷新订阅状态', '退出登录', '授予权限', '重新运行首次引导'],
+        'MainWindow.swift': ['更多语言…', '管理订阅', '恢复购买', '退出登录', '授予权限', '重新运行首次引导'],
         'SidebarAccountCard.swift': ['有邀请码？在这里兑换', '退出登录'],
         'CalendarViews.swift': ['允许访问', '允许访问日历'],
         'MeetingSummaryView.swift': ['打开原始记录'],
@@ -156,7 +156,10 @@ def audit(sources):
     assert 'Label(tr("删除所选"), systemImage: "trash")' in toolbar
     assert '.foregroundStyle(KKColor.textPrimary)' in toolbar.split('Label(tr("删除所选")', 1)[1].split('Button(tr("打开文件夹"))', 1)[0]
     assert '.buttonStyle(KKQuietButtonStyle())' in toolbar.split('Label(tr("删除所选")', 1)[1].split('Button(tr("打开文件夹"))', 1)[0]
-    assert 'requestDeletion(selectedFiles)' in toolbar and '.disabled(selectedFiles.isEmpty)' in toolbar
+    assert 'requestDeletion(selectedFiles)' in toolbar
+    delete_label = toolbar.index('Label(tr("删除所选"), systemImage: "trash")')
+    delete_chain = modifiers(toolbar, end(code(toolbar), code(toolbar).rfind('{', 0, delete_label)))
+    assert '.disabled(selectedFiles.isEmpty||selectedFiles.contains(where:{state.transcriptIsBusy($0.url)}))' in re.sub(r'\s+', '', delete_chain)
     for forbidden in ['KKColor.error', 'KKColor.warning', 'KKColor.brand', '.red', '.orange']:
         assert forbidden not in code(toolbar), forbidden
     folder_buttons = list(re.finditer(re.escape('Button(tr("打开文件夹"))'), main))
@@ -203,7 +206,7 @@ def audit(sources):
         'App.swift': [r'private var brandRed: Color \{ KKColor\.brand \}'],
         'HomeCaptionPreview.swift': [r'Rectangle\(\)\.fill\(KKColor\.brand\)'],
         'CaptionPanel.swift': [r'Rectangle\(\)\.fill\(KKColor\.brand\)'],
-        'IslandNotch.swift': [r'\.fill\(state\.silentTooLong \? KKColor\.warning : state\.running && !state\.paused \? KKColor\.brand : KKColor\.textTertiary\)', r'\.changeEffect\(\.glow\(color: KKColor\.brand, radius: 8\), value: state\.running\)'],
+        'IslandNotch.swift': [r'\.fill\(state\.captionDisplayStatus == \.error \? KKColor\.error : state\.captionDisplayStatus\.isWarning \? KKColor\.warning : state\.captionDisplayStatus == \.listening \? KKColor\.brand : KKColor\.textTertiary\)', r'\.changeEffect\(\.glow\(color: KKColor\.brand, radius: 8\), value: state\.running\)'],
     }
     for name, source in sources.items():
         mask = code(source)
@@ -249,6 +252,9 @@ counts = audit(sources)
 control_contrast(sources["DesignTokens.swift"])
 # Prove the audit rejects regressions, rather than only passing HEAD.
 mutations = [
+    ('MainWindow.swift', 'selectedFiles.isEmpty || selectedFiles.contains(where: { state.transcriptIsBusy($0.url) })', 'selectedFiles.isEmpty'),
+    ('MainWindow.swift', 'selectedFiles.isEmpty || selectedFiles.contains(where: { state.transcriptIsBusy($0.url) })', 'selectedFiles.contains(where: { state.transcriptIsBusy($0.url) })'),
+    ('MainWindow.swift', 'selectedFiles.isEmpty || selectedFiles.contains(where: { state.transcriptIsBusy($0.url) })', 'selectedFiles.isEmpty && selectedFiles.contains(where: { state.transcriptIsBusy($0.url) })'),
     ('MainWindow.swift', 'Label(tr("删除所选"), systemImage: "trash")\n                        .foregroundStyle(KKColor.textPrimary)', 'Label(tr("删除所选"), systemImage: "trash")\n                        .foregroundStyle(KKColor.error)'),
     ('MainWindow.swift', '}.buttonStyle(KKQuietButtonStyle()).foregroundStyle(KKColor.textPrimary)', '}.buttonStyle(KKQuietButtonStyle()).foregroundStyle(KKColor.warning)'),
     ('MeetingSummaryView.swift', '.buttonStyle(KKLinkButtonStyle())', '.buttonStyle(KKQuietButtonStyle())'),

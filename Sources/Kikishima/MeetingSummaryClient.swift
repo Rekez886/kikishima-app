@@ -65,6 +65,12 @@ final class MeetingSummaryClient: MeetingSummaryServicing, @unchecked Sendable {
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         urlRequest.setValue(request.requestID, forHTTPHeaderField: "x-request-id")
+        if let value = request.costSessionID, let id = UUID(uuidString: value) {
+            urlRequest.setValue(id.uuidString.lowercased(), forHTTPHeaderField: "x-kikishima-cost-session")
+        }
+        if let id = UUID(uuidString: request.requestID) {
+            urlRequest.setValue(id.uuidString.lowercased(), forHTTPHeaderField: "x-kikishima-cost-operation")
+        }
 
         let data: Data
         let response: URLResponse

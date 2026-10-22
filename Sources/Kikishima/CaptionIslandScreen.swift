@@ -4,7 +4,10 @@ import AppKit
 @MainActor
 enum CaptionIslandScreen {
     static func hasNotch(_ screen: NSScreen) -> Bool {
-        (screen.auxiliaryTopLeftArea != nil && screen.auxiliaryTopRightArea != nil)
+#if SHOOT
+        if ShootNotch.size(on: screen) != nil { return true }
+#endif
+        return (screen.auxiliaryTopLeftArea != nil && screen.auxiliaryTopRightArea != nil)
             || (isBuiltIn(screen) && screen.safeAreaInsets.top > 0)
     }
 
@@ -14,6 +17,9 @@ enum CaptionIslandScreen {
     }
 
     static func selected() -> NSScreen? {
+#if SHOOT
+        if let screen = ShootNotch.selectedScreen() { return screen }
+#endif
         let screens = NSScreen.screens
         let displays = screens.map {
             CaptionScreenPolicy.Display(isBuiltIn: isBuiltIn($0), hasNotch: hasNotch($0))

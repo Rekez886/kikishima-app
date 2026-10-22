@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -19,9 +20,20 @@ def snapshot():
     return {p.name for p in Path('/tmp').iterdir()}
 
 
-def no_leftovers(before, name):
+def no_leftovers(before, name, started):
     added = snapshot() - before
-    if added:raise AssertionError(f'{name}: /tmp 新增残留 {sorted(added)}（只报告，不删除）')
+    if added:
+        details = []
+        for entry in sorted(added):
+            try:
+                info = (Path('/tmp') / entry).lstat()
+                kind = ('符号链接' if stat.S_ISLNK(info.st_mode) else
+                        '目录' if stat.S_ISDIR(info.st_mode) else
+                        '文件' if stat.S_ISREG(info.st_mode) else '其他')
+                details.append(f'{entry}: {kind}, uid={info.st_uid}, mtime={info.st_mtime - started:+.3f}s')
+            except FileNotFoundError:
+                details.append(f'{entry}: 诊断前已消失')
+        raise AssertionError(f'{name}: /tmp 新增残留 {details}（只报告，不删除）')
     print('PASS', name, '/tmp 无新增残留')
 
 
@@ -35,15 +47,29 @@ def diagnose_owned(child):
     print('child diagnostic',json.dumps(evidence),flush=True)
 
 
+def reset_child_signals():
+    # This test is single-threaded. Only the forked child changes disposition;
+    # Bash must enter with defaults so its own traps can be installed.
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, signal.SIG_DFL)
+
+
 def run_case(argv, expected, ready=None, send=None, env=None):
+    started = time.time()
     before = snapshot()
     child = subprocess.Popen(argv, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             text=True, start_new_session=True)
+                             text=True, start_new_session=True, preexec_fn=reset_child_signals)
     try:
         if send is not None:
             deadline = time.monotonic() + 10
             while not ready.exists() and child.poll() is None and time.monotonic() < deadline:time.sleep(0.02)
-            if not ready.exists():raise AssertionError('Child did not reach the guarded body')
+            if not ready.exists():
+                if child.poll() is None:
+                    diagnose_owned(child)
+                    os.killpg(child.pid, signal.SIGTERM)
+                stdout, stderr = child.communicate(timeout=5)
+                raise AssertionError(f'Child did not reach the guarded body: {argv}; '
+                                     f'exit {child.returncode}\n{stdout}\n{stderr}')
             diagnose_owned(child)
             os.killpg(child.pid, send)
         stdout, stderr = child.communicate(timeout=30)
@@ -54,7 +80,7 @@ def run_case(argv, expected, ready=None, send=None, env=None):
             diagnose_owned(child)
             os.killpg(child.pid, signal.SIGTERM)
             child.communicate(timeout=5)
-    no_leftovers(before, f'{Path(argv[1]).name} exit={expected}')
+    no_leftovers(before, f'{Path(argv[1]).name} exit={expected}', started)
     return stdout, stderr
 
 
@@ -88,6 +114,7 @@ with guarded_workspace(__file__,output=explicit) as root:
         while True:time.sleep(1)
 ''')
 
+baseline_started = time.time()
 baseline = snapshot()
 for fixture, executable in [(shell, '/bin/bash'), (python, sys.executable)]:
     for mode, code, sig in [('success',0,None),('failure',7,None),
@@ -105,6 +132,47 @@ for mode, code, sig in [('success',0,None),('failure',7,None),
     assert (output/'payload').read_text() == 'payload'
     assert not (output/'compiler-intermediate').exists(), 'Compiler scratch polluted preserved output'
 print('PASS 显式输出目录在成功、失败、INT、TERM 后均保留')
+
+# Exercise the real preference writer and its shell cleanup on all exit paths.
+def preference_snapshot():
+    # Keep content and identity too: cleanup must not alter older runs' plists.
+    return {p.name: (p.lstat(), p.read_bytes())
+            for p in (Path.home() / 'Library/Preferences').glob(
+                'kikishima-notch-default-test-*.plist')}
+
+
+# Build once, before the signal-ready deadline starts. Cold Swift module caches
+# can take more than ten seconds; readiness must measure the fixture, not compilation.
+notch_binary = WORK / 'notch-default'
+run_case(['/bin/bash', str(ROOT/'tools/test_notch_default.sh'),
+          '--prepare', str(notch_binary)], 0)
+
+# macOS arm64: Swift precondition failure is SIGTRAP; Bash reports 128 + 5.
+for fault, code, sig in [('', 0, None), ('fail', 133, None), ('wait', 130, signal.SIGINT)]:
+    prefs_before = preference_snapshot()
+    ready = WORK / 'notch-wait.ready'
+    env = os.environ.copy()
+    env.pop('KK_NOTCH_TEST_FAULT', None)
+    if fault:
+        env['KK_NOTCH_TEST_FAULT'] = f'wait:{ready}' if fault == 'wait' else fault
+    try:
+        stdout, stderr = run_case(['/bin/bash', str(ROOT/'tools/test_notch_default.sh'),
+                                   '--run-prepared', str(notch_binary)], code,
+                                  ready=ready, send=sig, env=env)
+        if fault == 'fail':
+            assert 'injected notch default failure' in stderr, (
+                f'Notch test crashed before the intended fault:\n{stdout}\n{stderr}')
+    finally:
+        prefs_after = preference_snapshot()
+        added = prefs_after.keys() - prefs_before.keys()
+        assert not added, f'notch default 新增偏好残留 {sorted(added)}（只报告，不删除）'
+        changed = {name for name, (info, content) in prefs_before.items()
+                   if name not in prefs_after
+                   or (info.st_dev, info.st_ino, info.st_mtime_ns, content) !=
+                      (prefs_after[name][0].st_dev, prefs_after[name][0].st_ino,
+                       prefs_after[name][0].st_mtime_ns, prefs_after[name][1])}
+        assert not changed, f'notch default 改动了已有偏好 {sorted(changed)}'
+    print('PASS notch default preferences', fault or 'success', '新增 0 个')
 
 # Direct cleanup needs positive creation ownership, including an unchanged inode.
 # These are ordinary folders containing text fixtures, never executable apps.
@@ -157,5 +225,5 @@ for script in (ROOT/'tools').glob('test_*.sh'):
     assert 'kk_test_init "${BASH_SOURCE[0]}"' in text, script
     assert '$(mktemp ' not in text, script
     subprocess.run(['/bin/bash','-n',str(script)],check=True)
-no_leftovers(baseline, '完整卫生自测')
+no_leftovers(baseline, '完整卫生自测', baseline_started)
 print('PASS test hygiene: cleanup/gates/signals/explicit-output/real-fast-test/entrypoint coverage')

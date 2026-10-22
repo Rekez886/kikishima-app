@@ -4,6 +4,13 @@ private enum FakeFailure: Error {
     case upstream
 }
 
+private final class ChangeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    func increment() { lock.lock(); value += 1; lock.unlock() }
+    func count() -> Int { lock.lock(); defer { lock.unlock() }; return value }
+}
+
 private actor MemorySummaryStore: MeetingSummaryPersisting {
     private(set) var documents: [MeetingSummaryDocument] = []
     private var holdNextSave = false
@@ -88,12 +95,12 @@ private actor FakeSummaryClient: MeetingSummaryServicing {
     }
 }
 
-private func waitForRequests(_ count: Int, client: FakeSummaryClient) async {
+private func waitForRequests(_ count: Int, client: FakeSummaryClient, line: UInt = #line) async {
     for _ in 0..<20_000 {
         if await client.requestCount() >= count { return }
         await Task.yield()
     }
-    preconditionFailure("Timed out waiting for \(count) requests")
+    preconditionFailure("Timed out waiting for \(count) requests at line \(line)")
 }
 
 private func segment(_ id: String, text: String, second: Int = 0) -> SummarySourceSegment {
@@ -116,6 +123,26 @@ private func makeCoordinator(
         aliases: ["Ken"]
     )
     return coordinator
+}
+
+private func testCostSessionOwnership() async {
+    let client = FakeSummaryClient(), store = MemorySummaryStore()
+    let coordinator = MeetingSummaryCoordinator(client: client, store: store)
+    let firstID = UUID().uuidString, secondID = UUID().uuidString
+    for (generation, recordID) in [(1, firstID), (2, secondID)] {
+        await coordinator.begin(generation: generation, recordID: recordID,
+            transcriptURL: URL(fileURLWithPath: "/tmp/cost-fixture-\(generation).md"),
+            startedAt: Date(timeIntervalSince1970: 0), targetLanguage: "English", aliases: [])
+        await client.failNext()
+        await coordinator.accept(segment("cost-\(generation)", text: String(repeating: "a", count: 600)), generation: generation)
+        await coordinator.tick(now: Date(timeIntervalSince1970: 180), generation: generation)
+        await coordinator.tick(now: Date(timeIntervalSince1970: 181), generation: generation)
+        let initial = await client.request(at: (generation - 1) * 2)
+        let retry = await client.request(at: (generation - 1) * 2 + 1)
+        precondition(initial.costSessionID == recordID.lowercased())
+        precondition(retry.costSessionID == initial.costSessionID)
+        precondition(initial.requestID == retry.requestID)
+    }
 }
 
 private func testTriggerThresholds() async {
@@ -385,7 +412,11 @@ private func testFinalizeAfterBeginStillWritesRemaining() async {
     let client = FakeSummaryClient()
     await client.setManual(true)
     let store = MemorySummaryStore()
-    let coordinator = await makeCoordinator(client: client, store: store, generation: 7)
+    let changes = ChangeCounter()
+    let coordinator = MeetingSummaryCoordinator(client: client, store: store, onChange: { _ in changes.increment() })
+    await coordinator.begin(generation: 7, recordID: "record-7",
+        transcriptURL: URL(fileURLWithPath: "/tmp/meeting-7.md"), startedAt: Date(timeIntervalSince1970: 0),
+        targetLanguage: "English", aliases: [])
     await coordinator.accept(segment("keep", text: String(repeating: "k", count: 600)), generation: 7)
     let tick = Task { await coordinator.tick(now: Date(timeIntervalSince1970: 180), generation: 7) }
     await waitForRequests(1, client: client)
@@ -397,6 +428,17 @@ private func testFinalizeAfterBeginStillWritesRemaining() async {
         targetLanguage: "English",
         aliases: []
     )
+    // Freeze the older response AFTER it snapshots detached work. Register the
+    // tail during that save, then release it. No scheduler race is required.
+    await store.holdNext()
+    await client.resolveFirst()
+    for _ in 0..<20_000 {
+        if await store.isSaveHeld() { break }
+        await Task.yield()
+    }
+    let saveHeld = await store.isSaveHeld()
+    precondition(saveHeld, "Old response must be paused inside persistence")
+    let beforeFinalize = changes.count()
     let final = Task {
         await coordinator.finalize(
             remaining: [segment("tail", text: String(repeating: "t", count: 600), second: 190)],
@@ -404,7 +446,12 @@ private func testFinalizeAfterBeginStillWritesRemaining() async {
             generation: 7
         )
     }
-    await client.resolveFirst()
+    for _ in 0..<20_000 {
+        if changes.count() > beforeFinalize { break }
+        await Task.yield()
+    }
+    precondition(changes.count() > beforeFinalize, "Detached finalization must register its tail before releasing save")
+    await store.releaseSave()
     await waitForRequests(2, client: client)
     let tailRequest = await client.request(at: 1)
     precondition(tailRequest.final, "Previous meeting still sends a final batch after the next meeting begins")
@@ -521,6 +568,7 @@ private func testRetractDuringSave(beginNext: Bool) async {
 @main
 struct MeetingSummaryCoordinatorTest {
     static func main() async throws {
+        await testCostSessionOwnership()
         await testRetractDuringSave(beginNext: false)
         await testRetractDuringSave(beginNext: true)
         if CommandLine.arguments.contains("--save-race-only") {

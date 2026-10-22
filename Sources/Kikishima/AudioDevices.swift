@@ -59,3 +59,20 @@ enum AudioDevices {
         return e1 == noErr && e2 == noErr
     }
 }
+
+/// Read before the first menu body, then refresh at each presentation. Offscreen
+/// review has no appearance lifecycle guarantee and must not depend on host audio.
+enum MenuOutputDevice {
+    static func label(_ name: String?, none: String) -> String {
+        guard let name, !name.isEmpty else { return none }
+        return name
+    }
+    static func readName() -> String? {
+#if SHOOT || DEBUG
+        if ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_RENDER"] != nil {
+            return ShootSimulation.requestedMode == .errorDevice ? nil : "Review Speakers"
+        }
+#endif
+        return AudioDevices.defaultOutput().flatMap { AudioDevices.name(of: $0) }
+    }
+}

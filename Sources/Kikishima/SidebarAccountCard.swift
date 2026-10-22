@@ -26,6 +26,7 @@ struct SidebarBrandRow: View {
 
 struct SidebarAccountCard: View {
     let summary: SidebarAccountSummary
+    var showsAccountAction = true
     var login: () -> Void
     var upgrade: () -> Void
     var redeemInvite: () -> Void
@@ -48,8 +49,10 @@ struct SidebarAccountCard: View {
                 Text(tr("登录后每周 60 分钟免费翻译字幕。"))
                     .font(.system(size: 11)).foregroundStyle(KKColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Button(tr("登录"), action: login)
-                    .kkPrimaryButton().controlSize(.small)
+                if showsAccountAction {
+                    Button(tr("登录"), action: login)
+                        .kkPrimaryButton().controlSize(.small)
+                }
             case .free:
                 if let minutes = summary.remainingMinutes {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -65,6 +68,7 @@ struct SidebarAccountCard: View {
                 Text(tr("每周 60 分钟。升级 Pro 不限时长。"))
                     .font(.system(size: 11)).foregroundStyle(KKColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if showsAccountAction {
                 Button(action: upgrade) {
                     Text(tr("升级 Pro")).font(.system(size: 12, weight: .semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
@@ -73,6 +77,7 @@ struct SidebarAccountCard: View {
                         .background(brand, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(KKPlainButtonStyle())
+                }
                 Text(tr("Pro：$4.99/月 或 $39/年 · 7 天免费试用 · 随时取消"))
                     .font(.system(size: 10)).foregroundStyle(KKColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

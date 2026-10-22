@@ -12,7 +12,7 @@ root = Path('Sources/Kikishima')
 panel = (root / 'CaptionPanel.swift').read_text()
 island = (root / 'IslandNotch.swift').read_text()
 assert 'NSHostingView(rootView: CaptionFeedView(state: s))' in panel
-assert 'CaptionFeedView(state: state, hostedInNotch: true, hostSideInset: display.hostSideInset)' in island
+assert 'CaptionFeedView(state: state, hostedInNotch: true, hostSideInset: display.hostSideInset, toolbarNotchWidth: display.notchWidth, toolbarNotchHeight: display.toolbarNotchHeight)' in ' '.join(island.split())
 assert 'notchless' in island and 'IslandExpandedView(state:' in island
 
 def block(source, signature):
@@ -24,50 +24,13 @@ def block(source, signature):
         end += 1
     return '\n'.join(line.strip() for line in source[start:end].splitlines() if line.strip())
 
-# Hides bilingual history source; keep current compact/regular guards,
-# fallback behavior and translation-first order.
-row = panel[panel.index('private func captionRow('):]
-assert row.index('chunk.displayTranslation') < row.index('if CaptionHierarchy.showsSource')
-assert panel.index('Text(state.pendingDraft)') < panel.index('Text(state.pendingEn)')
-assert 'state.translationPaused && !state.showSource ? chunk.en : "…"' in row
-assert 'state.translationPaused ? (state.showSource ? "" : chunk.en) : "…"' in row
-source_condition = row[row.index('if CaptionHierarchy.showsSource'):].split('{', 1)[0]
-source_guard = ' '.join(source_condition[3:].split())
-policy = block((root / 'CaptionIsland.swift').read_text(), 'static func showsSource(')
-guards = []
-for name in ['compact', 'regular']:
-    guard = source_guard.replace('state.compactCaptions', 'true' if name == 'compact' else 'false')
-    guards.extend([(name, 'source', guard), (name, 'translation', 'state.showTranslation'),
-                   (name, 'pendingSource', 'state.showSource && !state.pendingEn.isEmpty'),
-                   (name, 'pendingTranslation', 'state.showTranslation && !state.pendingDraft.isEmpty')])
-
-# Execute actual Swift visibility expressions for both current and historical
-# sentences, all display modes, empty/nonempty translation and pending text.
-harness = 'enum CaptionHierarchy {\n' + policy + '\n}\n' + '''
-struct State {
-    var showSource: Bool; var showTranslation: Bool
-    var pendingEn: String; var pendingDraft: String
-}
-struct Chunk { var zh: String }
-for mode in ["both", "source", "translation"] {
-  for sentence in ["current", "history"] {
-    for translated in [false, true] {
-      for pending in [false, true] {
-        let state = State(showSource: mode != "translation", showTranslation: mode != "source",
-                          pendingEn: pending ? "source" : "", pendingDraft: pending ? "translation" : "")
-        let chunk = Chunk(zh: translated ? "translation" : "")
-        let current = sentence == "current"
-'''
-for name, key, guard in guards:
-    expected = {
-        'source': '(mode != "translation" && (sentence == "current" || mode == "source") && (mode == "source" || translated))' if name == 'compact' else '(mode != "translation" && (sentence == "current" || mode == "source"))',
-        'translation': '(mode != "source")',
-        'pendingSource': '(mode != "translation" && pending)',
-        'pendingTranslation': '(mode != "source" && pending)',
-    }[key]
-    harness += f'precondition(({guard}) == {expected}, "{name}.{key} \\(sentence) \\(mode)")\n'
-harness += '      }\n    }\n  }\n}\nprint("PASS caption visibility: current/history, bilingual/source/translation, pending and empty translation")\n'
-Path(sys.argv[1]).write_text(harness)
+# One role policy; the detailed source/waiting matrix is shared with the offline status tests.
+import subprocess
+out = Path(sys.argv[1])
+subprocess.run([sys.executable, 'tests/kk033_offline/prepare_source.py', str(out.parent)], check=True)
+code=(out.parent/'SourceMatrix.swift').read_text()
+code=code.replace('@main struct Matrix { static func main() {', 'func runMatrix() {').replace('\n}}\n', '\n}\nrunMatrix()\n')
+out.write_text(code)
 
 tokens = (root / 'DesignTokens.swift').read_text()
 active = block(tokens, 'func kkPrimaryButton(active: Bool)')

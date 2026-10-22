@@ -18,7 +18,8 @@ panel = read('Sources/Kikishima/CaptionPanel.swift')
 notch = read('Sources/Kikishima/IslandNotch.swift')
 for source in [panel, notch]:
     assert 'CaptionIslandScreen.selected()' in source
-    assert 'CaptionScreenPolicy.floatingFrame(screenFrame:' in source
+    screen = 'screen' if source == panel else 'scr'
+    assert f'CaptionScreenPolicy.floatingFrame(screenFrame: {screen}.frame, visibleFrame: {screen}.visibleFrame, size: size)' in source
     assert 'CaptionScreenPolicy.selectedIndex(' not in source
 assert 'private var usesIsland: Bool { CaptionState.shared.usesIslandCaptions }' in panel
 placement = panel.split('func place(for ', 1)[1].split('private let islandDisplay', 1)[0]

@@ -93,6 +93,31 @@ struct MeetingSummaryStoreTest {
         let loadedFailed = try await store.load(for: interruptedTranscript)
         precondition(loadedFailed?.status == .failed, "A failed summary remains visible as failed")
 
+        let recoveryURL = directory.appendingPathComponent("Recovery.md")
+        try await writer.write(markdown: "source + unfinished", to: recoveryURL)
+        var recoveryDocument = failedDocument
+        recoveryDocument.recordID = "record-recovery"
+        try await store.save(recoveryDocument, beside: recoveryURL)
+        try await store.replaceTranscript(expected: "source + unfinished", with: "source + translation", at: recoveryURL)
+        let recoveredSummary = try await store.load(for: recoveryURL)
+        let recoveryFingerprint = try MeetingSummaryStore.sha256(of: recoveryURL)
+        precondition(recoveredSummary?.sourceFingerprint == recoveryFingerprint,
+                     "Caption recovery must preserve summary retry eligibility")
+        precondition(recoveredSummary?.sourceIndex == recoveryDocument.sourceIndex && recoveredSummary?.status == .failed)
+        let movedRecovery = directory.appendingPathComponent("Recovery moved in Finder.md")
+        try fileManager.moveItem(at: recoveryURL, to: movedRecovery)
+        let recoveredAssociation = try await store.load(for: movedRecovery)
+        precondition(recoveredAssociation?.recordID == "record-recovery",
+                     "Recovery must preserve summary association through external rename")
+        // Refreshing a fingerprint must not silently approve unrelated prior edits.
+        try "external source edit".write(to: movedRecovery, atomically: true, encoding: .utf8)
+        // Restore the known filename so association can find a deliberately stale sidecar.
+        try fileManager.moveItem(at: movedRecovery, to: recoveryURL)
+        try await store.replaceTranscript(expected: "external source edit", with: "another translation", at: recoveryURL)
+        let staleSummary = try await store.load(for: recoveryURL)
+        precondition(staleSummary?.sourceFingerprint == recoveryFingerprint,
+                     "A previously stale source fingerprint must not be approved")
+
         let renamed = directory.appendingPathComponent("Renamed.md")
         try await store.renameRecord(from: transcript, to: renamed)
         precondition(!fileManager.fileExists(atPath: transcript.path))

@@ -45,7 +45,8 @@ let long = String(repeating:"word ",count:150)+"end."
 check(translationCutoff(long,doneChars:0,tuning:.medium,age:4,stableFor:3) <= 160, "punctuation cannot bypass cap")
 check(translationCutoff("We agree",doneChars:0,tuning:.medium,age:2.1,stableFor:2.1) == 0, "two seconds alone is not a boundary")
 check(translationCutoff("We agree",doneChars:0,tuning:.medium,age:4,stableFor:2.1) == 8, "bounded volatile wait")
-check(translationCutoff("We agree",doneChars:0,tuning:.medium,age:2.1,stableFor:2.1,finalized:true) == 8, "finalized tail can flush")
+check(translationCutoff("We agree",doneChars:0,tuning:.medium,age:2.5,stableFor:2.1,finalized:true) == 8, "finalized short tail can flush at observation threshold")
+check(translationCutoff("We agree",doneChars:0,tuning:.medium,age:2.4,stableFor:2.1,finalized:true) == 0, "finalized short tail waits to join continuation")
 check(TranslationText.acknowledgement("Yes, yes, yes!") == "yes", "pure repetition compacted")
 for text in ["Yes?", "Yes, but no", "No, no", "Yes we cannot approve", "はい、違います"] {
  check(TranslationText.acknowledgement(text) == nil, "meaningful/question/negative answer preserved")

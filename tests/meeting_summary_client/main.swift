@@ -122,6 +122,25 @@ struct MeetingSummaryClientTest {
         let valid = try await client.summarize(request())
         precondition(valid.content.overview.first?.text == "Launch planning.")
 
+        for costID in [UUID().uuidString, "private-record-title", ""] {
+            var correlated = request()
+            correlated.costSessionID = costID
+            correlated.requestID = UUID().uuidString
+            let expectedID = UUID(uuidString: costID)?.uuidString.lowercased()
+            let expectedOperation = correlated.requestID.lowercased()
+            let encoded = try JSONEncoder().encode(correlated)
+            let object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+            precondition(object["costSessionID"] == nil, "Correlation must not change the strict request JSON")
+            let decoded = try JSONDecoder().decode(SummarizeRequest.self, from: encoded)
+            precondition(decoded.costSessionID == nil)
+            StubURLProtocol.configure { req in
+                precondition(req.value(forHTTPHeaderField: "x-kikishima-cost-session") == expectedID)
+                precondition(req.value(forHTTPHeaderField: "x-kikishima-cost-operation") == expectedOperation)
+                return (HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, try response())
+            }
+            _ = try await client.summarize(correlated)
+        }
+
         let beforeOversized = StubURLProtocol.count()
         await expect(.requestTooLarge, client: client, request: request(text: String(repeating: "a", count: 61 * 1024)))
         let afterOversized = StubURLProtocol.count()

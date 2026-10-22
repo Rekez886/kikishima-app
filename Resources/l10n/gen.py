@@ -12,6 +12,51 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 每条：简中 key → [繁中, 日, 英, 韩]
 T = {
+"显示选项：仅译文": ["僅譯文", "訳文のみ", "Translation", "번역만"],
+"显示选项：仅原文": ["僅原文", "原文のみ", "Source", "원문만 표시"],
+"未登录，字幕只显示原文；登录后继续翻译": ["未登入，字幕只顯示原文；登入後繼續翻譯", "未ログインのため原文のみ表示。ログイン後に翻訳を再開", "Not signed in. Captions show source text only.", "로그인하지 않아 원문만 표시됩니다. 로그인하면 번역이 재개됩니다."],
+
+"无": ["無", "なし", "None", "없음"],
+"无输出设备": ["無輸出裝置", "出力なし", "No output", "출력 없음"],
+"音频恢复中": ["音訊恢復中", "音声復旧中", "Audio recovering", "오디오 복구 중"],
+"切换中": ["切換中", "切替中", "Switching", "전환 중"],
+"开发令牌启用": ["開發權杖啟用", "開発トークン有効", "Dev token on", "개발 토큰 활성"],
+"缺录音权限": ["缺錄音權限", "録音未許可", "No access", "권한 없음"],
+"重连中": ["重連中", "再接続中", "Reconnecting", "재연결 중"],
+"请求过频": ["請求過頻", "リクエスト過多", "Rate limited", "요청 과다"],
+"无可存画面": ["無可存畫面", "保存画像なし", "No frame to save", "저장할 화면 없음"],
+"保存失败": ["儲存失敗", "保存失敗", "Save failed", "저장 실패"],
+"已保存": ["已儲存", "保存済み", "Saved", "저장 완료"],
+"设备已切换": ["裝置已切換", "出力切替済み", "Output switched", "출력 전환됨"],
+"收尾中": ["收尾中", "仕上げ中", "Finishing", "마무리 중"],
+"Pro 已开通": ["Pro 已開通", "Pro有効", "Pro activated", "Pro 활성화"],
+"需 Pro": ["需 Pro", "Pro必須", "Pro needed", "Pro 필요"],
+"字幕中断": ["字幕中斷", "字幕停止", "Stopped", "자막 중단"],
+"启动失败": ["啟動失敗", "起動失敗", "Start failed", "시작 실패"],
+"无法继续": ["無法繼續", "再開不可", "Start failed", "재개 불가"],
+"采音失败": ["收音失敗", "音声エラー", "Audio error", "오디오 오류"],
+"登录过期": ["登入過期", "認証切れ", "Expired", "로그인 만료"],
+"离线，正在重连": ["離線，正在重新連線", "オフライン、再接続中", "Offline, reconnecting", "오프라인, 다시 연결 중"],
+"修复": ["修復", "修復", "Fix", "수정"],
+"已复制": ["已複製", "コピーしました", "Copied", "복사됨"],
+"输出设备：%@": ["輸出裝置：%@", "出力デバイス：%@", "Output device: %@", "출력 장치: %@"],
+"切换输出设备，当前 %@": ["切換輸出裝置，目前 %@", "出力デバイスを変更、現在 %@", "Change output device, currently %@", "출력 장치 변경, 현재 %@"],
+"捕获范围：全部系统音频": ["擷取範圍：全部系統音訊", "収録対象：すべてのシステム音声", "Capturing: all system audio", "캡처 범위: 모든 시스템 오디오"],
+"先看到第一句真实译文": ["先看到第一句真實譯文", "まず実際の翻訳を確認しましょう", "See your first real translation", "첫 실제 번역 확인하기"],
+"开始后会播放测试语音，用系统音频识别并在线翻译。看到原文和译文后才能完成引导。": ["開始後會播放測試語音，透過系統音訊辨識並在線上翻譯。看到原文和譯文後才能完成引導。", "開始するとテスト音声を再生し、システム音声を認識してオンラインで翻訳します。原文と訳文を確認すると設定を完了できます。", "Starting plays test speech through system audio, then transcribes and translates it online. Setup finishes after real source text and a translation appear.", "시작하면 테스트 음성을 재생하고 시스템 오디오를 인식하여 온라인으로 번역합니다. 실제 원문과 번역이 표시되면 설정을 완료할 수 있습니다."],
+"真实字幕测试成功": ["真實字幕測試成功", "実際の字幕テストに成功しました", "Live caption test succeeded", "실제 자막 테스트 성공"],
+"未检测到测试语音。请播放当前会议语言的音频，检查输出设备和系统录音权限，再重试。": ["未偵測到測試語音。請播放目前會議語言的音訊，檢查輸出裝置和系統錄音權限，再重試。", "テスト音声を検出できませんでした。現在の会議言語の音声を再生し、出力デバイスとシステム録音の権限を確認して再試行してください。", "No test speech detected. Play audio in the current meeting language, check the output device and system recording permission, then retry.", "테스트 음성이 감지되지 않았습니다. 현재 회의 언어의 오디오를 재생하고 출력 장치와 시스템 녹음 권한을 확인한 후 다시 시도하세요."],
+"检查权限": ["檢查權限", "権限を確認", "Check permissions", "권한 확인"],
+"重播测试语音": ["重播測試語音", "テスト音声を再生", "Replay test speech", "테스트 음성 다시 재생"],
+"开始并播放测试语音": ["開始並播放測試語音", "開始してテスト音声を再生", "Start and play test speech", "시작하고 테스트 음성 재생"],
+"可以多选。首次只下载默认会议语言，其他语言在使用时下载。": ["可以多選。首次只下載預設會議語言，其他語言在使用時下載。", "複数選べます。最初は既定の会議言語のみをダウンロードし、他の言語は使用時にダウンロードします。", "Choose multiple languages. Initially, only the default meeting language downloads; others download when used.", "여러 언어를 선택할 수 있습니다. 처음에는 기본 회의 언어만 다운로드하고 다른 언어는 사용할 때 다운로드합니다."],
+"首次只预下载默认会议语言的转写模型。": ["首次只預先下載預設會議語言的轉寫模型。", "最初は既定の会議言語の文字起こしモデルのみを事前ダウンロードします。", "Initially, only the default meeting language’s transcription model downloads in advance.", "처음에는 기본 회의 언어의 음성 인식 모델만 미리 다운로드합니다."],
+"回看本场字幕": ["回看本場字幕", "今回の字幕を見返す", "Review This Session", "이번 세션 자막 보기"],
+"回看已暂停更新，字幕仍在继续。重新打开可载入最新内容。": ["回看已暫停更新，字幕仍在繼續。重新開啟可載入最新內容。", "見返し中は表示を固定しています。字幕は継続中です。開き直すと最新の内容を表示します。", "This view is paused while live captions continue. Reopen it to load the latest content.", "이 화면은 업데이트가 멈춰 있지만 실시간 자막은 계속됩니다. 다시 열면 최신 내용을 볼 수 있습니다."],
+"搜索原文或译文": ["搜尋原文或譯文", "原文または訳文を検索", "Search source or translation", "원문 또는 번역 검색"],
+"复制双语字幕": ["複製雙語字幕", "原文と訳文をコピー", "Copy bilingual captions", "원문과 번역 복사"],
+"回到实时": ["回到即時", "リアルタイムに戻る", "Back to live", "실시간으로 돌아가기"],
+"译文尚未完成": ["譯文尚未完成", "翻訳が未完了です", "Translation not finished", "번역 미완료"],
 "记录列表": ["記錄列表", "記録リスト", "Record list", "기록 목록"],
 "双语": ["雙語", "二言語", "Bilingual", "이중 언어"],
 "仅桌面紧凑字幕生效，开启后无法点击工具条或拖动窗口。可在这里关闭；停止字幕也可用菜单栏或快捷键。": ["僅桌面緊湊字幕生效，開啟後無法點擊工具列或拖動視窗。可在這裡關閉；停止字幕也可用選單列或快捷鍵。", "デスクトップのコンパクト字幕のみ対象です。有効時はツールバー操作やウインドウ移動ができません。ここで解除できます。字幕の停止にはメニューバーやショートカットも使えます。", "Applies only to compact desktop captions. While enabled, the toolbar and window dragging are unavailable. Turn it off here; use the menu bar or shortcut to stop captions.", "데스크탑 간결한 자막에만 적용됩니다. 켜면 도구 모음 클릭과 창 이동이 불가능합니다. 여기서 끌 수 있으며, 메뉴 막대나 단축키로 자막을 중지할 수 있습니다."],
@@ -24,7 +69,7 @@ T = {
 "翻译已暂停": ["翻譯已暫停", "翻訳を一時停止中", "Translation paused", "번역 일시 정지됨"],
 "字幕设置": ["字幕設定", "字幕の設定", "Caption settings", "자막 설정"],
 "灵动岛": ["靈動島", "アイランド", "Island", "아일랜드"],
-"桌面窗口": ["桌面視窗", "デスクトップ ウインドウ", "Desktop window", "데스크탑 창"],
+"桌面窗口": ["桌面視窗", "デスクトップ ウインドウ", "Desktop Window", "데스크탑 창"],
 "灵动岛贴在摄像头下方；桌面窗口可拖动、可改大小。": ["靈動島貼在攝影機下方；桌面視窗可拖曳、可改大小。", "アイランドはカメラの下に表示。デスクトップ ウインドウはドラッグとサイズ変更ができます。", "The island sits under the camera; the desktop window can be dragged and resized.", "아일랜드는 카메라 아래에 표시됩니다. 데스크탑 창은 드래그와 크기 조절이 가능합니다."],
 "字号 %@": ["字級 %@", "文字サイズ %@", "Size %@", "글자 크기 %@"],
 "字号": ["字級", "文字サイズ", "Size", "글자 크기"],
@@ -102,7 +147,7 @@ T = {
 "会议语言": ["會議語言", "会議の言語", "Meeting language", "회의 언어"],
 "会议语言（转写）": ["會議語言（轉寫）", "会議の言語（音声認識）", "Meeting language (transcription)", "회의 언어 (음성 인식)"],
 "你最熟悉的语言是哪一个？": ["你最熟悉的語言是哪一個？", "いちばん得意な言語はどれですか？", "Which language are you most comfortable with?", "가장 익숙한 언어는 무엇인가요?"],
-"停止字幕": ["停止字幕", "字幕を停止", "Stop captions", "자막 중지"],
+"停止字幕": ["停止字幕", "字幕を停止", "Stop Captions", "자막 중지"],
 "允许": ["允許", "許可", "Allow", "허용"],
 "先跳过": ["先跳過", "あとで", "Skip for now", "나중에"],
 "免费版": ["免費版", "無料プラン", "Free", "무료 플랜"],
@@ -129,7 +174,7 @@ T = {
 "场景": ["場景", "シーン", "Scene", "장면"],
 "复制原文": ["複製原文", "原文をコピー", "Copy source", "원문 복사"],
 "复制译文": ["複製譯文", "訳文をコピー", "Copy translation", "번역 복사"],
-"字幕位置": ["字幕位置", "字幕の位置", "Caption position", "자막 위치"],
+"字幕位置": ["字幕位置", "字幕の位置", "Caption Position", "자막 위치"],
 "字幕运行中不能换会议语言，先停止。": ["字幕運行中不能換會議語言，先停止。", "字幕の実行中は会議の言語を変更できません。先に停止してください。", "Stop captions before changing the meeting language.", "자막 실행 중에는 회의 언어를 바꿀 수 없습니다. 먼저 중지하세요."],
 "完成": ["完成", "完了", "Done", "완료"],
 "已允许": ["已允許", "許可済み", "Allowed", "허용됨"],
@@ -143,7 +188,7 @@ T = {
 "开会时：菜单栏点图标 → 开始字幕，或者 **%@**。字幕窗会浮在会议窗口上面，全屏也能看到。": ["開會時：點選單列圖示 → 開始字幕，或者 **%@**。字幕視窗會浮在會議視窗上面，全螢幕也能看到。", "会議中：メニューバーのアイコン → 字幕を開始、または **%@**。字幕は会議画面の上に浮き、フルスクリーンでも見えます。", "In a meeting: click the menu bar icon → Start captions, or **%@**. The caption window floats above the meeting, even in full screen.", "회의 중: 메뉴 막대 아이콘 → 자막 시작, 또는 **%@**. 자막 창은 회의 창 위에 떠 있으며 전체 화면에서도 보입니다."],
 "开发": ["開發", "開発", "Dev", "개발"],
 "开发者": ["開發者", "開発者", "Developer", "개발자"],
-"开始字幕": ["開始字幕", "字幕を開始", "Start captions", "자막 시작"],
+"开始字幕": ["開始字幕", "字幕を開始", "Start Captions", "자막 시작"],
 "当前判定：%@": ["目前判定：%@", "現在の判定：%@", "Detected: %@", "현재 판정: %@"],
 "当前生效：%@": ["目前生效：%@", "現在有効：%@", "Active: %@", "현재 적용: %@"],
 "必需": ["必需", "必須", "Required", "필수"],
@@ -154,13 +199,13 @@ T = {
 "打开": ["打開", "開く", "Open", "열기"],
 "打开文件夹": ["打開資料夾", "フォルダを開く", "Open folder", "폴더 열기"],
 "打开系统设置": ["打開系統設定", "システム設定を開く", "Open System Settings", "시스템 설정 열기"],
-"打开记录文件夹": ["打開記錄資料夾", "記録フォルダを開く", "Open transcripts folder", "기록 폴더 열기"],
+"打开记录文件夹": ["打開記錄資料夾", "記録フォルダを開く", "Open Transcripts Folder", "기록 폴더 열기"],
 "换个邮箱": ["換個信箱", "別のメールアドレス", "Use another email", "다른 이메일"],
 "授予权限": ["授予權限", "権限を許可", "Grant permission", "권한 허용"],
 "搜索文件名": ["搜尋檔名", "ファイル名で検索", "Search file names", "파일 이름 검색"],
 "方式": ["方式", "方式", "Method", "방식"],
 "日语": ["日語", "日本語", "Japanese", "일본어"],
-"显示字幕窗": ["顯示字幕視窗", "字幕ウインドウを表示", "Show caption window", "자막 창 표시"],
+"显示字幕窗": ["顯示字幕視窗", "字幕ウインドウを表示", "Show Caption Window", "자막 창 표시"],
 "最近记录": ["最近記錄", "最近の記録", "Recent transcripts", "최근 기록"],
 "服务器地址": ["伺服器位址", "サーバーアドレス", "Server URL", "서버 주소"],
 "未登录": ["未登入", "未ログイン", "Not signed in", "로그인 안 됨"],
@@ -175,7 +220,7 @@ T = {
 "界面和字幕译文都会用这个语言。之后随时能改。": ["介面和字幕譯文都會用這個語言。之後隨時能改。", "画面と字幕の訳文にこの言語を使います。あとで変更できます。", "The app and caption translations will use this language. You can change it anytime.", "앱 화면과 자막 번역에 이 언어를 사용합니다. 나중에 바꿀 수 있어요."],
 "界面和译文会立即切换。": ["介面會立即切換為所選語言；譯文語言同時生效。", "画面は選んだ言語にすぐ切り替わります。訳文の言語も同時に反映。", "The app switches to this language right away; caption translations too.", "앱 화면이 바로 이 언어로 바뀝니다. 자막 번역도 함께 적용."],
 "界面语言": ["介面語言", "表示言語", "App language", "앱 언어"],
-"登录": ["登入", "ログイン", "Sign in", "로그인"],
+"登录": ["登入", "ログイン", "Sign In", "로그인"],
 "登录后每周 60 分钟免费翻译字幕。": ["登入後每週 60 分鐘免費翻譯字幕。", "ログインすると週60分の翻訳字幕が無料。", "Sign in for 60 free minutes of translated captions a week.", "로그인하면 주 60분 무료 번역 자막."],
 "系统要求": ["系統需求", "システム要件", "Requirements", "시스템 요구 사항"],
 "组合键": ["組合鍵", "キーの組み合わせ", "Key combo", "키 조합"],
@@ -348,7 +393,7 @@ T.update({
 })
 
 T.update({
-"紧凑字幕": ["緊湊字幕", "コンパクト字幕", "Compact captions", "간결한 자막"],
+"紧凑字幕": ["緊湊字幕", "コンパクト字幕", "Compact Captions", "간결한 자막"],
 "紧凑字幕（只显示最近两句译文）": ["緊湊字幕（只顯示最近兩句譯文）", "コンパクト字幕（直近2文の訳文のみ）", "Compact captions (last two translated lines only)", "간결한 자막 (최근 두 문장 번역만)"],
 })
 T["麦克风被占用时判定为会议（字幕在上方），否则当作看视频（字幕贴在发声窗口底部）。"] = ["麥克風被佔用時判定為會議（字幕在上方），否則當作看影片（字幕貼在發聲視窗底部）。", "マイク使用中は会議と判定（字幕は上）、それ以外は動画（音の出ているウインドウの下部に字幕）。", "Mic in use = meeting (captions on top); otherwise video (captions at the bottom of the window playing audio).", "마이크 사용 중이면 회의(자막 상단), 아니면 동영상(소리 나는 창 하단에 자막)."]
@@ -404,7 +449,11 @@ T.update({
 "Kikishima 字幕": ["Kikishima 字幕", "Kikishima 字幕", "Kikishima captions", "Kikishima 자막"],
 "复制全部译文": ["複製全部譯文", "訳文をすべてコピー", "Copy all translations", "번역 전체 복사"],
 "音频电平": ["音訊電平", "音量レベル", "Audio level", "오디오 레벨"],
-"音频输入停止了：检查输出设备是否被拔掉": ["音訊輸入停止了：檢查輸出裝置是否被拔掉", "音声が届いていません。出力デバイスが外れていないか確認してください", "Audio stopped arriving: check whether the output device was disconnected", "오디오 입력이 멈췄습니다. 출력 장치가 분리되지 않았는지 확인하세요"],
+"没有输出设备": ["無輸出裝置", "出力機器なし", "No output device", "출력 장치 없음"],
+"音频中断，恢复中": ["音訊中斷，恢復中", "音声中断、復旧中", "Audio reconnecting", "오디오 복구 중"],
+"需要录音权限": ["需要錄音權限", "録音の許可が必要", "Recording blocked", "녹음 권한 필요"],
+"没有输出设备，听不到会议声音": ["沒有輸出裝置，聽不到會議聲音", "出力機器がなく、会議音声を聞けません", "No output device, so meeting audio cannot be heard", "출력 장치가 없어 회의 소리를 들을 수 없습니다"],
+"音频中断，正在恢复": ["音訊中斷，正在恢復", "音声が中断しました。復旧中です", "Audio interrupted, recovering", "오디오가 중단되어 복구 중입니다"],
 "未登录 · 点「打开 Kikishima」登录": ["未登入 · 點「打開 Kikishima」登入", "未ログイン · 「Kikishimaを開く」からログイン", "Not signed in · use Open Kikishima to sign in", "로그인 안 됨 · 「Kikishima 열기」에서 로그인"],
 "以后再说": ["以後再說", "あとで", "Later", "나중에"],
 "会议是日语或其他语言？在「打开 Kikishima」里改会议语言。人名、产品名总被翻错？把它们加进术语表。": ["會議是日語或其他語言？在「打開 Kikishima」裡改會議語言。人名、產品名總被翻錯？把它們加進術語表。", "会議が日本語や他の言語なら「Kikishimaを開く」で会議の言語を変更。人名や製品名の誤訳は用語集に追加。", "Meeting in Japanese or another language? Change it under Open Kikishima. Names keep getting mistranslated? Add them to the glossary.", "회의가 일본어나 다른 언어라면 「Kikishima 열기」에서 회의 언어를 바꾸세요. 이름이 계속 잘못 번역되면 용어집에 추가하세요."],
@@ -420,8 +469,8 @@ T.update({
 "删除后会移到废纸篓，可以恢复。": ["刪除後會移到垃圾桶，之後仍可復原。", "削除するとゴミ箱に移動し、元に戻せます。", "It will be moved to the Trash, where it can be recovered.", "삭제하면 휴지통으로 이동하며 다시 복원할 수 있습니다."],
 "无法删除记录": ["無法刪除記錄", "記録を削除できません", "Couldn't Delete Transcript", "기록을 삭제할 수 없습니다"],
 "组合键注册失败（可能被其他 app 占用），换一个": ["組合鍵註冊失敗（可能被其他 app 佔用），換一個", "ショートカットを登録できません（他のアプリが使用中の可能性）。別のものにしてください", "Couldn't register the shortcut (another app may be using it); pick another", "단축키를 등록할 수 없습니다(다른 앱이 사용 중일 수 있음). 다른 조합을 선택하세요"],
-"允许字幕窗出现在屏幕共享中": ["允許字幕窗出現在螢幕共享中", "字幕ウインドウを画面共有に表示する", "Show the caption window in screen sharing", "화면 공유에 자막 창 표시"],
-"默认关闭：共享屏幕时对方看不到你的字幕。": ["預設關閉：共享螢幕時對方看不到你的字幕。", "デフォルトはオフ：画面共有しても相手に字幕は見えません。", "Off by default: people you share your screen with never see your captions.", "기본 꺼짐: 화면을 공유해도 상대방은 자막을 볼 수 없습니다."],
+"允许兼容的共享方式捕获字幕窗": ["允許相容的共享方式擷取字幕視窗", "対応する共有方式で字幕ウインドウの取得を許可", "Allow compatible sharing methods to capture captions", "지원되는 공유 방식에서 자막 창 캡처 허용"],
+"关闭此项不能保证字幕不被共享或录屏。共享前请手动隐藏字幕，并在参会者设备上确认。": ["關閉此項不能保證字幕不被共享或錄影。共享前請手動隱藏字幕，並在與會者裝置上確認。", "オフにしても、共有や録画に字幕が映らない保証はありません。共有前に字幕を手動で隠し、参加者の端末で確認してください。", "Turning this off does not guarantee captions are excluded from sharing or recording. Hide captions manually before sharing and check on a participant’s device.", "이 옵션을 꺼도 공유나 녹화에서 자막이 숨겨진다고 보장할 수 없습니다. 공유 전에 자막을 직접 숨기고 참가자 기기에서 확인하세요."],
 "会议记录保存位置": ["會議記錄儲存位置", "会議記録の保存先", "Transcripts folder", "회의 기록 저장 위치"],
 "更改…": ["更改…", "変更…", "Change…", "변경…"],
 "选择": ["選擇", "選択", "Choose", "선택"],
@@ -437,7 +486,7 @@ T.update({
 "更长 = 一句更完整、更连贯，但每句晚出 1～2 秒。": ["更長 = 一句更完整、更連貫，但每句晚出 1～2 秒。", "長いほど一文がまとまって読みやすくなりますが、表示が1～2秒遅れます。", "Longer = more complete, coherent sentences, but each line appears 1 to 2 seconds later.", "길수록 문장이 완전하고 자연스럽지만 각 줄이 1~2초 늦게 표시됩니다."],
 "暂停字幕": ["暫停字幕", "字幕を一時停止", "Pause Captions", "자막 일시 정지"],
 "继续字幕": ["繼續字幕", "字幕を再開", "Resume Captions", "자막 재개"],
-"已暂停": ["已暫停", "一時停止中", "Paused", "일시 정지됨"],
+"已暂停": ["已暫停", "一時停止中", "Paused", "일시 정지"],
 "已暂停 · 声音不再记录": ["已暫停 · 聲音不再記錄", "一時停止中 · 音声は記録されません", "Paused · audio is not being captured", "일시 정지 · 오디오가 기록되지 않습니다"],
 "继续": ["繼續", "再開", "Resume", "재개"],
 "继续中…": ["繼續中…", "再開しています…", "Resuming…", "재개 중…"],
@@ -463,8 +512,8 @@ T.update({
 "两项必需权限还没都允许：现在不给也行，开始字幕时系统会再问一次。": ["兩項必需權限還沒都允許：現在不給也行，開始字幕時系統會再問一次。", "必須の2つの権限がまだ揃っていません。今は許可しなくても、字幕開始時にシステムが再度確認します。", "Both required permissions aren't granted yet. You can skip for now; macOS will ask again when you start captions.", "필수 권한 두 개가 아직 모두 허용되지 않았습니다. 지금 건너뛰어도 자막을 시작할 때 macOS가 다시 묻습니다."],
 "显示内容": ["顯示內容", "表示内容", "Show", "표시 내용"],
 "原文 + 译文": ["原文 + 譯文", "原文 + 訳文", "Source + translation", "원문 + 번역"],
-"仅译文": ["僅譯文", "訳文のみ", "Translation only", "번역만"],
-"仅原文": ["僅原文", "原文のみ", "Source only", "원문만"],
+"仅译文": ["僅譯文", "訳文のみ", "Translation Only", "번역만"],
+"仅原文": ["僅原文", "原文のみ", "Source only", "원문만 표시"],
 "字幕窗宽度 %@%（屏幕宽的比例）": ["字幕窗寬度 %@%（螢幕寬的比例）", "字幕ウインドウの幅 %@%（画面幅に対する比率）", "Caption window width %@% of the screen", "자막 창 너비 %@%(화면 너비 기준)"],
 "紧凑字幕（只显示最近两句）": ["緊湊字幕（只顯示最近兩句）", "コンパクト字幕（直近2文のみ）", "Compact captions (last two lines only)", "간결한 자막(최근 두 문장만)"],
 "即时草稿译文（Apple 本地翻译，灰色；正式译文到达后替换）": ["即時草稿譯文（Apple 本地翻譯，灰色；正式譯文到達後替換）", "即時ドラフト訳（Apple のオンデバイス翻訳、灰色。正式な訳文が届いたら置き換え）", "Instant draft translation (Apple on-device, gray; replaced when the final arrives)", "즉시 초안 번역(Apple 온디바이스, 회색. 정식 번역이 오면 교체)"],
@@ -490,8 +539,8 @@ T.update({
 "下载后解压，在 chrome://extensions 删掉旧的再「加载已解压的扩展程序」选新文件夹。": ["下載後解壓，在 chrome://extensions 刪掉舊的再「載入未封裝項目」選新資料夾。", "ダウンロードして解凍し、chrome://extensions で古いものを削除してから「パッケージ化されていない拡張機能を読み込む」で新しいフォルダを選んでください。", "Unzip it, remove the old one at chrome://extensions, then Load unpacked and pick the new folder.", "압축을 풀고 chrome://extensions에서 기존 항목을 삭제한 뒤 「압축해제된 확장 프로그램을 로드합니다」로 새 폴더를 선택하세요."],
 "扩展 %@ · 最近一次联系：%@": ["擴充功能 %@ · 最近一次聯繫：%@", "拡張 %@ · 最終通信：%@", "Extension %@ · last seen %@", "확장 프로그램 %@ · 마지막 연결 %@"],
 "重新运行首次引导": ["重新執行首次引導", "初回セットアップをやり直す", "Run first-time setup again", "처음 설정 다시 실행"],
-"会议语言：%@": ["會議語言：%@", "会議の言語：%@", "Meeting language: %@", "회의 언어: %@"],
-"更多会议语言…": ["更多會議語言…", "ほかの会議言語…", "More meeting languages…", "더 많은 회의 언어…"],
+"会议语言：%@": ["會議語言：%@", "会議の言語：%@", "Meeting Language: %@", "회의 언어: %@"],
+"更多会议语言…": ["更多會議語言…", "ほかの会議言語…", "More Meeting Languages…", "더 많은 회의 언어…"],
 "已切换为%@": ["已切換為%@", "%@に切り替えました", "Switched to %@", "%@(으)로 전환됨"],
 "正在切换为%@…": ["正在切換為%@…", "%@に切り替えています…", "Switching to %@…", "%@(으)로 전환 중…"],
 "切换会议语言失败：%@": ["切換會議語言失敗：%@", "会議の言語を切り替えられません：%@", "Couldn't switch meeting language: %@", "회의 언어를 전환할 수 없음: %@"],
@@ -566,8 +615,8 @@ T.update({
  ],
  "下载中 %@%": [
   "下載中 %@%",
-  "ダウンロード中 %@%",
-  "Downloading %@%",
+  "ダウンロード %@%",
+  "Download %@%",
   "다운로드 중 %@%"
  ]
 })
@@ -602,6 +651,88 @@ T.update({
 T.update({
  "隐藏边栏": ["隱藏側邊欄", "サイドバーを非表示", "Hide Sidebar", "사이드바 가리기"],
  "显示边栏": ["顯示側邊欄", "サイドバーを表示", "Show Sidebar", "사이드바 보기"]
+})
+
+T.update({
+ "管理订阅": ["管理訂閱", "サブスクリプションを管理", "Manage subscription", "구독 관리"],
+ "恢复购买": ["恢復購買", "購入を復元", "Restore purchases", "구매 복원"],
+ "正在连接订阅服务…": ["正在連接訂閱服務…", "サブスクリプションサービスに接続中…", "Connecting to subscription service…", "구독 서비스에 연결 중…"],
+ "订阅服务尚未配置，请稍后重试": ["訂閱服務尚未設定，請稍後再試", "サブスクリプションサービスの準備ができていません。時間をおいてお試しください", "Subscriptions are not set up yet. Please try again later.", "구독 서비스가 아직 설정되지 않았습니다. 나중에 다시 시도하세요."],
+ "未找到与当前账号绑定的购买，请确认账号或联系支持": ["找不到與目前帳號綁定的購買，請確認帳號或聯絡支援", "このアカウントに紐づく購入が見つかりません。アカウントを確認するかサポートにお問い合わせください", "No purchase is linked to this account. Check your account or contact support.", "현재 계정에 연결된 구매가 없습니다. 계정을 확인하거나 지원팀에 문의하세요."],
+ "操作太频繁，请稍后重试": ["操作太頻繁，請稍後再試", "操作が多すぎます。少し待ってからお試しください", "Too many requests. Please try again shortly.", "요청이 너무 많습니다. 잠시 후 다시 시도하세요."],
+ "无法连接订阅服务，请稍后重试": ["無法連接訂閱服務，請稍後再試", "サブスクリプションサービスに接続できません。時間をおいてお試しください", "Could not connect to the subscription service. Please try again.", "구독 서비스에 연결할 수 없습니다. 나중에 다시 시도하세요."],
+ "购买将绑定当前登录账号，付款邮箱仅用于联系。": ["購買將綁定目前登入的帳號，付款信箱僅用於聯絡。", "購入は現在ログイン中のアカウントに紐づきます。支払い時のメールアドレスは連絡用です。", "Purchases are linked to your signed-in account. The billing email is only for contact.", "구매는 현재 로그인한 계정에 연결됩니다. 결제 이메일은 연락용으로만 사용됩니다."],
+ "免费版每周 60 分钟，登录即用；购买后当前账号自动升级 Pro。": ["免費版每週 60 分鐘，登入即用；購買後目前帳號自動升級 Pro。", "無料プランは週60分。ログインすればすぐ使えます。購入後は現在のアカウントが自動的にProになります。", "Free plan: 60 minutes a week. After purchase, your signed-in account is upgraded to Pro automatically.", "무료 플랜은 주 60분. 구매 후 현재 로그인한 계정이 자동으로 Pro로 업그레이드됩니다."],
+ "免费版：每周 60 分钟翻译字幕，购买后当前账号自动升级 Pro。": ["免費版：每週 60 分鐘翻譯字幕，購買後目前帳號自動升級 Pro。", "無料プラン：翻訳字幕は週60分。購入後は現在のアカウントが自動的にProになります。", "Free plan: 60 minutes of translated captions a week. Purchase upgrades your signed-in account to Pro automatically.", "무료 플랜: 주 60분 번역 자막. 구매 후 현재 로그인한 계정이 자동으로 Pro로 업그레이드됩니다."]
+})
+
+T.update({
+ "已停止采音，正在完成最后一句…": [
+  "已停止收音，正在完成最後一句…",
+  "音声の取得を停止しました。最後の字幕を処理中…",
+  "Audio capture stopped. Finishing the last captions…",
+  "오디오 캡처를 멈췄습니다. 마지막 자막을 마무리하는 중…"
+ ],
+ "部分字幕未翻译完成，可在记录中重试": [
+  "部分字幕尚未翻譯完成，可在記錄中重試",
+  "一部の字幕は未翻訳です。記録から再試行できます",
+  "Some captions are unfinished. Retry from History.",
+  "일부 자막의 번역이 끝나지 않았습니다. 기록에서 다시 시도할 수 있습니다."
+ ],
+ "译文未完成，原文已保留": [
+  "譯文未完成，原文已保留",
+  "翻訳は未完了です。原文は保存されています",
+  "Translation unfinished; original text preserved",
+  "번역 미완료, 원문은 저장되었습니다"
+ ],
+ "正在补翻未完成字幕…": [
+  "正在補翻未完成字幕…",
+  "未完了の字幕を翻訳中…",
+  "Translating unfinished captions…",
+  "미완료 자막을 번역하는 중…"
+ ],
+ "记录已改变或不支持补翻，请打开原始记录。": [
+  "記錄已變更或不支援補翻，請開啟原始記錄。",
+  "記録が変更されたか、再翻訳に対応していません。元の記録を開いてください。",
+  "This record changed or does not support retry. Open the original record.",
+  "기록이 변경되었거나 재번역을 지원하지 않습니다. 원본 기록을 열어 주세요."
+ ],
+ "登录后才能补翻记录。": [
+  "登入後才能補翻記錄。",
+  "記録を再翻訳するにはログインしてください。",
+  "Sign in to translate unfinished records.",
+  "기록을 다시 번역하려면 로그인해 주세요."
+ ],
+ "补翻已结束，已完成的译文已保存；未完成部分可再次重试。": [
+  "補翻已結束，已完成的譯文已儲存；未完成部分可再次重試。",
+  "処理が終了し、完了した翻訳を保存しました。未完了の部分は再試行できます。",
+  "Retry finished. Completed translations are saved; unfinished parts can be retried.",
+  "재번역이 끝났습니다. 완료된 번역은 저장되었으며 미완료 부분은 다시 시도할 수 있습니다."
+ ],
+ "记录已改变或无法保存，补翻已停止。": [
+  "記錄已變更或無法儲存，補翻已停止。",
+  "記録が変更されたか保存できないため、再翻訳を停止しました。",
+  "Retry stopped because the record changed or could not be saved.",
+  "기록이 변경되었거나 저장할 수 없어 재번역을 멈췄습니다."
+ ],
+ "还有 %@ 段译文未完成，原文已保留。": [
+  "還有 %@ 段譯文未完成，原文已保留。",
+  "未完了の翻訳が %@ 件あります。原文は保存されています。",
+  "%@ translations are unfinished. Original text is preserved.",
+  "번역 %@개가 미완료 상태입니다. 원문은 저장되었습니다."
+ ],
+ "重试未完成字幕": [
+  "重試未完成字幕",
+  "未完了の字幕を再翻訳",
+  "Retry unfinished captions",
+  "미완료 자막 다시 번역"
+ ],
+ "补翻已停止，已完成的译文已保存。": [
+  "補翻已停止，已完成的譯文已儲存。",
+  "再翻訳を停止しました。完了した翻訳は保存されています。",
+  "Retry stopped. Completed translations are saved.",
+  "재번역을 멈췄습니다. 완료된 번역은 저장되었습니다."
+ ]
 })
 
 langs = ["zh-Hant", "ja", "en", "ko"]

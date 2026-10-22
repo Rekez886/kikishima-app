@@ -59,3 +59,11 @@ enum L10nTables {
     for a in args { if let r = s.range(of: "%@") { s.replaceSubrange(r, with: String(describing: a)) } }
     return s
 }
+
+/// Shared display-selector vocabulary. Status copy keeps its unscoped keys.
+@MainActor func captionDisplayText(_ key: String) -> String {
+    if key == "双语" { return tr("双语") }
+    let scoped = key == "仅译文" ? "显示选项：仅译文" : "显示选项：仅原文"
+    let translated = tr(scoped)
+    return translated == scoped ? key : translated
+}

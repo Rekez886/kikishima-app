@@ -95,7 +95,7 @@ struct MainWindowView: View {
     }
 
     private var quotaCard: some View {
-        SidebarAccountCard(summary: accountSummary,
+        SidebarAccountCard(summary: accountSummary, showsAccountAction: state.mainSection != .settings,
             login: { state.mainSection = .settings },
             upgrade: { state.openUpgrade() },
             redeemInvite: { state.mainSection = .settings; state.focusInvite = true },
@@ -131,27 +131,30 @@ struct CaptionsHome: View {
         return list
     }
 
-    private var previewText: CaptionPreviewText {
-        CaptionPreviewText(
-            segments: state.compactCaptionChunks.filter { !$0.isMarker }.map {
-                (source: $0.displaySource, translation: $0.displayTranslation)
-            },
-            pendingSource: state.pendingEn, pendingTranslation: state.pendingDraft,
-            translationPaused: state.translationPaused)
+    private var previewRows: [CaptionRowText] {
+        let chunks = state.compactCaptionChunks.filter { !$0.isMarker }
+        let active = state.running || state.starting || state.finishingCaptions
+        let latest = chunks.last.flatMap { chunk in
+            chunk.zh.isEmpty && (chunk.translationExhausted || state.translationPaused || chunk.captionFinalized || !active)
+                ? chunk.id : chunks.last(where: { CaptionReadingPolicy.isReadable($0.zh, isDraft: $0.isDraft) })?.id
+        }
+        var rows = chunks.map { chunk in
+            CaptionHierarchy.row(source: chunk.displaySource, translation: chunk.displayTranslation,
+                waiting: !chunk.translationExhausted && !state.translationPaused && !chunk.captionFinalized && active,
+                current: chunk.id == latest, showTranslation: state.showTranslation, showSource: state.showSource)
+        }
+        if !state.pendingEn.isEmpty || !state.pendingDraft.isEmpty {
+            rows.append(CaptionHierarchy.row(source: state.pendingEn, translation: state.pendingDraft,
+                waiting: !state.translationPaused && active, current: true,
+                showTranslation: state.showTranslation, showSource: state.showSource))
+        }
+        return rows
     }
     private var previewSource: String {
-        #if SHOOT || DEBUG
-        if ShootSimulation.requestedMode != nil { return ShootSimulation.previewSource }
-#endif
-        guard state.running || state.starting else { return "Let's review the next steps together." }
-        return previewText.source
+        state.running || state.starting || state.finishingCaptions ? "" : "Let's review the next steps together."
     }
     private var previewTranslation: String {
-        #if SHOOT || DEBUG
-        if ShootSimulation.requestedMode != nil { return ShootSimulation.previewTranslation }
-#endif
-        guard state.running || state.starting else { return HomeCaptionPreview.sampleTranslation(for: state.targetLang) }
-        return previewText.translation
+        state.running || state.starting || state.finishingCaptions ? "" : HomeCaptionPreview.sampleTranslation(for: state.targetLang)
     }
 
     var body: some View {
@@ -168,10 +171,10 @@ struct CaptionsHome: View {
                 }
 
                 HomeCaptionPreview(
-                    source: previewSource, translation: previewTranslation, status: state.status,
+                    source: previewSource, translation: previewTranslation, rows: previewRows, status: state.status,
                     warning: state.silentTooLong,
                     compact: state.compactCaptions, display: state.captionDisplay,
-                    desktop: state.captionSurface == "window", isExample: !state.running && !state.starting)
+                    desktop: state.captionSurface == "window", statusPresentedExternally: true, isExample: !state.running && !state.starting && !state.finishingCaptions)
 
                 VStack(alignment: .leading, spacing: 8) {
                 HomeCaptionControls(active: state.running || state.starting, running: state.running,
@@ -181,6 +184,7 @@ struct CaptionsHome: View {
                     // Expose the controls that actually receive keyboard focus,
                     // rather than a separate virtual VStack of replacement controls.
                     .accessibilityElement(children: .contain)
+                    .disabled(state.finishingCaptions)
                 Text(tr("快捷键 %@", GlobalHotkey.displayText))
                     .font(.caption).foregroundStyle(KKColor.textSecondary)
                 }
@@ -225,6 +229,9 @@ struct CaptionsHome: View {
                         .buttonStyle(KKLinkButtonStyle())
                 }
                 .task {
+#if SHOOT || DEBUG
+                    if ShootSimulation.requestedMode != nil { allLocales = state.meetingLocales; return }
+#endif
                     await state.refreshModelInstallation()
                     allLocales = await SpeechTranscriber.supportedLocales.map(\.identifier).sorted()
                 }
@@ -364,7 +371,7 @@ struct RecentTranscripts: View {
     var body: some View {
         GroupBox {
             if files.isEmpty {
-                Text(tr("还没有会议记录。停止字幕时会自动保存到「%@」。", CaptionState.transcriptDir.path(percentEncoded: false))).font(.caption).foregroundStyle(KKColor.textSecondary).padding(6)
+                Text(tr("还没有会议记录。停止字幕时会自动保存到「%@」。", transcriptDisplayPath(CaptionState.transcriptDir, homeDirectory: FileManager.default.homeDirectoryForCurrentUser))).font(.caption).foregroundStyle(KKColor.textSecondary).padding(6)
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(files.prefix(limit)) { f in
@@ -514,6 +521,7 @@ struct HistoryView: View {
     @State private var pendingDeletions: [TranscriptFile] = []
     @State private var showingDeletionConfirmation = false
     @State private var contents: [URL: String] = [:]
+    @State private var incompleteTranslations: [URL: Int] = [:]
     @State private var summaries: [URL: MeetingSummaryDocument] = [:]
     @State private var retryableSummaryURLs: Set<URL> = []
     @State private var operationError: String?
@@ -532,6 +540,7 @@ struct HistoryView: View {
 
     /// 重命名：系统 alert 里一个输入框，改的是文件名（不含 .md）
     private func rename(_ f: TranscriptFile) {
+        guard !state.transcriptIsBusy(f.url) else { return }
         let alert = NSAlert()
         alert.messageText = tr("重命名记录")
         alert.addButton(withTitle: tr("好")); alert.addButton(withTitle: tr("取消"))
@@ -540,6 +549,7 @@ struct HistoryView: View {
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard !state.transcriptIsBusy(f.url) else { return }
         let newName = field.stringValue.replacingOccurrences(of: "[/:\\\\\n\r\t]", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
         guard !newName.isEmpty, newName != f.name else { return }
         let dest = f.url.deletingLastPathComponent().appendingPathComponent(newName + ".md")
@@ -561,12 +571,13 @@ struct HistoryView: View {
     }
 
     private func requestDeletion(_ files: [TranscriptFile]) {
-        guard !files.isEmpty else { return }
+        guard !files.isEmpty, !files.contains(where: { state.transcriptIsBusy($0.url) }) else { return }
         pendingDeletions = files
         showingDeletionConfirmation = true
     }
 
     private func delete(_ files: [TranscriptFile]) {
+        guard !files.contains(where: { state.transcriptIsBusy($0.url) }) else { return }
         Task {
             let result = await summaryStore.trashRecords(at: files.map(\.url))
             for url in result.succeeded {
@@ -586,12 +597,17 @@ struct HistoryView: View {
     private func reload() async {
         let loadedFiles = await Task.detached(priority: .utility) { loadTranscripts() }.value
         var loadedContents: [URL: String] = [:]
+        var loadedIncomplete: [URL: Int] = [:]
         var loadedSummaries: [URL: MeetingSummaryDocument] = [:]
         var loadedRetryableURLs: Set<URL> = []
         for file in loadedFiles {
-            loadedContents[file.url] = await Task.detached(priority: .utility) {
-                (try? String(contentsOf: file.url, encoding: .utf8)) ?? ""
+            let loaded = await Task.detached(priority: .utility) {
+                let markdown = (try? String(contentsOf: file.url, encoding: .utf8)) ?? ""
+                let recovery = TranscriptRecovery.decode(markdown)
+                return (body: recovery?.body ?? markdown, incomplete: recovery?.incompleteCount)
             }.value
+            loadedContents[file.url] = loaded.body
+            loadedIncomplete[file.url] = loaded.incomplete
             if let document = try? await summaryStore.load(for: file.url) {
                 let currentFingerprint = await Task.detached(priority: .utility) {
                     try? MeetingSummaryStore.sha256(of: file.url)
@@ -613,6 +629,7 @@ struct HistoryView: View {
         }
         files = loadedFiles
         contents = loadedContents
+        incompleteTranslations = loadedIncomplete
         summaries = loadedSummaries
         retryableSummaryURLs = loadedRetryableURLs
         selection.formIntersection(Set(loadedFiles.map(\.id)))
@@ -635,7 +652,7 @@ struct HistoryView: View {
                         .foregroundStyle(KKColor.textPrimary)
                 }
                 .buttonStyle(KKQuietButtonStyle())
-                .disabled(selectedFiles.isEmpty)
+                .disabled(selectedFiles.isEmpty || selectedFiles.contains(where: { state.transcriptIsBusy($0.url) }))
                 Button(tr("打开文件夹")) {
                     try? FileManager.default.createDirectory(at: CaptionState.transcriptDir, withIntermediateDirectories: true)
                     NSWorkspace.shared.open(CaptionState.transcriptDir)
@@ -643,7 +660,7 @@ struct HistoryView: View {
             }
             TextField(tr("搜索标题或内容"), text: $query, prompt: Text(tr("搜索标题或内容")).foregroundStyle(KKColor.textSecondary)).kkFocusRing().textFieldStyle(.roundedBorder).frame(maxWidth: 320).accessibilityLabel(tr("搜索标题或内容"))
             if files.isEmpty {
-                ContentUnavailableView(tr("还没有会议记录"), systemImage: "doc.text", description: Text(tr("停止字幕时会自动保存到「%@」。", CaptionState.transcriptDir.path(percentEncoded: false))))
+                ContentUnavailableView(tr("还没有会议记录"), systemImage: "doc.text", description: Text(tr("停止字幕时会自动保存到「%@」。", transcriptDisplayPath(CaptionState.transcriptDir, homeDirectory: FileManager.default.homeDirectoryForCurrentUser))))
             } else if shown.isEmpty {
                 ContentUnavailableView.search(text: query)
             } else {
@@ -670,11 +687,12 @@ struct HistoryView: View {
                         if let file = targets.first, targets.count == 1 {
                             Button(tr("打开")) { NSWorkspace.shared.open(file.url) }
                             Button(tr("在访达中显示")) { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
-                            Button(tr("重命名…")) { rename(file) }
+                            Button(tr("重命名…")) { rename(file) }.disabled(state.transcriptIsBusy(file.url))
                             Divider()
                         }
                         if !targets.isEmpty {
                             Button(tr("删除"), role: .destructive) { requestDeletion(targets) }
+                                .disabled(targets.contains(where: { state.transcriptIsBusy($0.url) }))
                         }
                     } primaryAction: { ids in
                         for file in shown where ids.contains(file.id) {
@@ -693,18 +711,32 @@ struct HistoryView: View {
                     .onDeleteCommand { requestDeletion(selectedFiles) }
 
                     if let selected = files.first(where: { $0.id == previewSelection }) {
-                        MeetingSummaryDetailView(
-                            transcript: selected,
-                            document: summaries[selected.url],
-                            canRetry: retryableSummaryURLs.contains(selected.url)
-                                && state.canRetryMeetingSummary(recordID: summaries[selected.url]?.recordID),
-                            onRetry: {
-                                if let document = summaries[selected.url] {
-                                    state.retryMeetingSummary(document: document, transcriptURL: selected.url)
-                                }
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let count = incompleteTranslations[selected.url], count > 0 {
+                                Text(tr("还有 %@ 段译文未完成，原文已保留。", count))
+                                    .foregroundStyle(KKColor.textSecondary)
+                                Button(tr("重试未完成字幕")) { state.retryTranscript(at: selected.url) }
+                                    .buttonStyle(KKQuietButtonStyle())
+                                    .foregroundStyle(KKColor.textPrimary)
+                                    .disabled(!state.canRetryTranscript(at: selected.url))
                             }
-                        )
-                        .id(selected.id)
+                            if state.transcriptRetryMessageURL == selected.url, let message = state.transcriptRetryMessage {
+                                Text(message).font(.caption).foregroundStyle(KKColor.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            MeetingSummaryDetailView(
+                                transcript: selected,
+                                document: summaries[selected.url],
+                                canRetry: retryableSummaryURLs.contains(selected.url)
+                                    && state.canRetryMeetingSummary(recordID: summaries[selected.url]?.recordID),
+                                onRetry: {
+                                    if let document = summaries[selected.url] {
+                                        state.retryMeetingSummary(document: document, transcriptURL: selected.url)
+                                    }
+                                }
+                            )
+                            .id(selected.id)
+                        }
                         .frame(minWidth: 280, maxWidth: .infinity)
                     }
                 }
@@ -714,6 +746,7 @@ struct HistoryView: View {
         .task { await reload() }
         .onChange(of: state.meetingSummarySnapshot) { Task { await reload() } }
         .onChange(of: state.summaryDiskRevision) { Task { await reload() } }
+        .onChange(of: state.transcriptDiskRevision) { Task { await reload() } }
         .onChange(of: selection) { oldSelection, newSelection in
             previewSelection = HistoryPreview.selectedID(
                 previous: previewSelection, oldSelection: oldSelection,
@@ -859,6 +892,7 @@ struct LanguagesView: View {
 // MARK: - 设置（账号 + 快捷键 + 常规）
 
 struct SettingsPane: View {
+    @ObservedObject private var captionPanel = CaptionPanelController.shared
     @Bindable var state: CaptionState
     @State private var launchAtLogin = LaunchAtLoginController.live()
     @State private var email = ""
@@ -905,13 +939,19 @@ struct SettingsPane: View {
                                 .kkPrimaryButton()
                         }
                         Spacer()
-                        Button(tr("刷新订阅状态")) { state.refreshPlan() }
+                        Button(tr("管理订阅")) { state.openSubscriptionManagement() }
                         .buttonStyle(KKLinkButtonStyle())
+                        .disabled(state.billingBusy)
+                        Button(tr("恢复购买")) { state.restorePurchases() }
+                        .buttonStyle(KKLinkButtonStyle())
+                        .disabled(state.billingBusy)
                         Button(tr("退出登录")) { state.signOut() }
                         .buttonStyle(KKLinkButtonStyle())
                     }
+                    if state.billingBusy { Text(tr("正在连接订阅服务…")).font(.caption).foregroundStyle(KKColor.textSecondary) }
+                    if !state.billingError.isEmpty { Text(state.billingError).font(.caption).foregroundStyle(KKColor.error) }
                     if state.plan != "pro" && state.plan != "dev" {
-                        Text(tr("请用与账号相同的邮箱付款，才能自动升级。")).font(.caption).foregroundStyle(KKColor.textSecondary)
+                        Text(tr("购买将绑定当前登录账号，付款邮箱仅用于联系。")).font(.caption).foregroundStyle(KKColor.textSecondary)
                         // 邀请码用于兑换终身 / 限期 Pro，区别于 Polar 结账页的折扣码
                         HStack {
                             TextField(tr("有邀请码？"), text: $invite).kkFocusRing()
@@ -959,7 +999,7 @@ struct SettingsPane: View {
                                 .disabled(!email.contains("@") || state.activating)
                         }
                     }
-                    Text(tr("免费版每周 60 分钟，登录即用；付费后同一邮箱自动升级 Pro。")).font(.caption).foregroundStyle(KKColor.textSecondary)
+                    Text(tr("免费版每周 60 分钟，登录即用；购买后当前账号自动升级 Pro。")).font(.caption).foregroundStyle(KKColor.textSecondary)
                 }
                 if !state.activationError.isEmpty { Text(state.activationError).font(.caption).foregroundStyle(KKColor.error) }
             }
@@ -1037,9 +1077,9 @@ struct SettingsPane: View {
                     .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("字幕位置"), selection: Binding(get: { state.captionSurface }, set: { state.selectCaptionSurface($0) }), options: [(tr("灵动岛"), "island"), (tr("桌面窗口"), "window")]) }
                 }
                 Text(state.captionSurface == "window" ? tr("桌面窗口可拖动、可改大小。") : tr("灵动岛贴在摄像头下方；桌面窗口可拖动、可改大小。")).font(.caption).foregroundStyle(KKColor.textSecondary)
-                captionSetting(tr("显示内容"), value: tr(state.captionDisplay == "both" ? "双语" : state.captionDisplay == "translation" ? "仅译文" : "仅原文")) {
-                    KKSegmentedPicker(title: tr("显示内容"), selection: $state.captionDisplay, options: [(tr("双语"), "both"), (tr("仅译文"), "translation"), (tr("仅原文"), "source")])
-                    .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("显示内容"), selection: $state.captionDisplay, options: [(tr("双语"), "both"), (tr("仅译文"), "translation"), (tr("仅原文"), "source")]) }
+                captionSetting(tr("显示内容"), value: captionDisplayText(state.captionDisplay == "both" ? "双语" : state.captionDisplay == "translation" ? "仅译文" : "仅原文")) {
+                    KKSegmentedPicker(title: tr("显示内容"), selection: $state.captionDisplay, options: [(tr("双语"), "both"), (captionDisplayText("仅译文"), "translation"), (captionDisplayText("仅原文"), "source")])
+                    .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("显示内容"), selection: $state.captionDisplay, options: [(tr("双语"), "both"), (captionDisplayText("仅译文"), "translation"), (captionDisplayText("仅原文"), "source")]) }
                 }
                 captionSetting(tr("字幕窗宽度"), value: sizeLabel(state.captionWidthLevel, low: "窄", high: "宽")) {
                     CaptionSizeLevelPicker(title: tr("字幕窗宽度"), level: $state.captionWidthLevel, low: "窄", high: "宽")
@@ -1080,8 +1120,21 @@ struct SettingsPane: View {
                     Text(tr("仅桌面紧凑字幕生效，开启后无法点击工具条或拖动窗口。可在这里关闭；停止字幕也可用菜单栏或快捷键。"))
                         .font(.caption).foregroundStyle(KKColor.textSecondary)
                 }
-                Toggle(tr("允许字幕窗出现在屏幕共享中"), isOn: $state.captionsVisibleInScreenShare).toggleStyle(KKSwitchToggleStyle())
-                Text(tr("默认关闭：共享屏幕时对方看不到你的字幕。")).font(.caption).foregroundStyle(KKColor.textSecondary)
+                Toggle(tr("允许兼容的共享方式捕获字幕窗"), isOn: $state.captionsVisibleInScreenShare).toggleStyle(KKSwitchToggleStyle())
+                Text(tr("关闭此项不能保证字幕不被共享或录屏。共享前请手动隐藏字幕，并在参会者设备上确认。")).font(.caption).foregroundStyle(KKColor.textSecondary)
+                Button { captionPanel.toggleVisible(mode: state.effectiveMode) } label: {
+                    Text(captionPanel.hasVisibleCaptions ? tr("隐藏字幕窗") : tr("显示字幕窗"))
+                        .foregroundStyle(KKColor.textPrimary)
+                        .padding(.horizontal, KKSpace.three)
+                        .frame(height: 28)
+                        .background(KKColor.surfaceRaised, in: RoundedRectangle(cornerRadius: KKRadius.sm))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: KKRadius.sm)
+                                .strokeBorder(KKColor.captionVisibilityBorder, lineWidth: 1)
+                        }
+                }
+                .buttonStyle(KKPlainButtonStyle(radius: KKRadius.sm))
+                .accessibilityIdentifier("kk-sharing-hide-captions")
             }
             Section(tr("常规")) {
                 Toggle(tr("登录时自动启动"), isOn: Binding(
@@ -1091,7 +1144,7 @@ struct SettingsPane: View {
                 Toggle(tr("在 Dock 显示图标"), isOn: Binding(get: { AppDelegate.showDockIcon }, set: { AppDelegate.showDockIcon = $0 })).toggleStyle(KKSwitchToggleStyle())
                 LabeledContent(tr("会议记录保存位置")) {
                     HStack {
-                        Text(CaptionState.transcriptDir.path(percentEncoded: false)).font(.caption).foregroundStyle(KKColor.textSecondary).lineLimit(1).truncationMode(.middle)
+                        Text(transcriptDisplayPath(CaptionState.transcriptDir, homeDirectory: FileManager.default.homeDirectoryForCurrentUser)).font(.caption).foregroundStyle(KKColor.textSecondary).lineLimit(1).truncationMode(.middle)
                         Button(tr("打开文件夹")) {
                             try? FileManager.default.createDirectory(at: CaptionState.transcriptDir, withIntermediateDirectories: true)
                             NSWorkspace.shared.open(CaptionState.transcriptDir)

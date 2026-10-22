@@ -16,34 +16,40 @@ struct CaptionChunk: Identifiable {
     let createdAt = Date()      // 延迟计量 + 记录时间戳
     let timingCreatedAt = ProcessInfo.processInfo.systemUptime
     var timingPendingAt: TimeInterval?
+    var timingMetadata: TranslationTimingMetadata?
     var sourceFinal = false
     var translationComplete = false
     var previousSource: String?
     var translationAttempts = 0
     var retryAfter = Date.distantPast
+    var translationExhausted = false
+    var captionFinalized: Bool { translationComplete || translationExhausted }
+    var captionTranslation: String { translationExhausted ? "" : displayTranslation }
     var displaySource: String { TranslationText.acknowledgement(en) ?? en }
     var displayTranslation: String { zh.isEmpty || translationComplete ? zh : zh + " …" }
 }
 
 /// 音频线程写、主线程读；锁保护整组电平与时间戳，snapshot 一次读取一致状态。
 final class AudioMeter: @unchecked Sendable {
-    struct Snapshot { let level: Double; let lastLoudAt: CFAbsoluteTime; let lastIOAt: CFAbsoluteTime }
+    struct Snapshot { let level: Double; let lastLoudAt: CFAbsoluteTime; let lastIOAt: CFAbsoluteTime; let audibleTime: TimeInterval }
     private let lock = NSLock()
     private var level: Double = 0
     private var lastLoudAt: CFAbsoluteTime = 0
     private var lastIOAt: CFAbsoluteTime = 0
     private var lastCalc: CFAbsoluteTime = 0
+    private var audibleTime: TimeInterval = 0
     func snapshot() -> Snapshot {
         lock.lock(); defer { lock.unlock() }
-        return Snapshot(level: level, lastLoudAt: lastLoudAt, lastIOAt: lastIOAt)
+        return Snapshot(level: level, lastLoudAt: lastLoudAt, lastIOAt: lastIOAt, audibleTime: audibleTime)
     }
-    func reset() { lock.lock(); defer { lock.unlock() }; level = 0; lastLoudAt = CFAbsoluteTimeGetCurrent(); lastIOAt = 0; lastCalc = 0 }
+    func reset() { lock.lock(); defer { lock.unlock() }; level = 0; lastLoudAt = CFAbsoluteTimeGetCurrent(); lastIOAt = 0; lastCalc = 0; audibleTime = 0 }
     /// 音频回调里调：取第一路的 RMS，10Hz 节流，每 8 个采样取一个
     func ingest(_ list: UnsafePointer<AudioBufferList>, format: AVAudioFormat) {
         lock.lock(); defer { lock.unlock() }
         let now = CFAbsoluteTimeGetCurrent()
         lastIOAt = now
         guard now - lastCalc > 0.1, format.commonFormat == .pcmFormatFloat32, list.pointee.mNumberBuffers > 0 else { return }
+        let elapsed = lastCalc > 0 ? min(0.25, max(0, now - lastCalc)) : 0
         lastCalc = now
         let buf = list.pointee.mBuffers
         let n = Int(buf.mDataByteSize) / MemoryLayout<Float>.size
@@ -54,11 +60,14 @@ final class AudioMeter: @unchecked Sendable {
         while i < n { sum += p[i] * p[i]; i += 8 }
         let rms = sqrt(sum / Float(max(1, n / 8)))
         level = Double(min(1, rms * 6))
-        if level > 0.02 { lastLoudAt = now }
+        #if DEBUG || SHOOT
+        CaptionLevelLog.append(level: level)
+        #endif
+        if level > 0.02 { lastLoudAt = now; audibleTime += elapsed }
     }
 }
 
-/// 字幕窗顶部横幅：错误/提示 + 可选动作
+/// 字幕状态行：只显示需要用户处理且带动作的错误。保留类型名供现有调用方使用。
 struct CaptionBanner: Equatable {
     enum Severity { case info, error }
     enum Action: Equatable {
@@ -67,14 +76,18 @@ struct CaptionBanner: Equatable {
             switch self {
             case .login: return trAny("登录")
             case .upgrade: return trAny("升级 Pro")
-            case .retry: return trAny("重试")
-            case .openSettings: return trAny("打开系统设置")
+            case .retry: return trAny("修复")
+            case .openSettings: return trAny("修复")
             }
         }
     }
     var text: String
     var severity: Severity = .error
     var action: Action? = nil
+    var settingsURL: String? = nil
+    var shortText: String { CaptionStatusCopy.resolve(fullText: text, translate: { trAny($0) }).shortText }
+    var fullText: String { text }
+    var showsStatusLine: Bool { severity == .error }
 }
 
 /// 字幕位置场景：会议（贴屏幕顶部、摄像头下方，看字幕 = 看镜头）/ 视频（贴底部，像普通字幕）/ 自动（麦克风在用 = 开会）
@@ -94,6 +107,20 @@ enum CaptionMode: String, CaseIterable, Identifiable {
 }
 enum EffectiveMode { case meeting, video }
 
+/// Producers send immutable request values. Only the MainActor consumer owns
+/// mutable status buffers; completion shares the same ordered event stream.
+enum TranslationCallbackEvent: Sendable {
+    case status(TranslationConnectivityRequest, String)
+    case failure(TranslationConnectivityRequest, TranslateFailure)
+    case completion(TranslationConnectivityRequest, @MainActor @Sendable () async -> Void)
+
+    var request: TranslationConnectivityRequest {
+        switch self {
+        case .status(let request, _), .failure(let request, _), .completion(let request, _): return request
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class CaptionState {
@@ -104,6 +131,9 @@ final class CaptionState {
     )
 
     init() {
+#if SHOOT
+        if ShootAudioOnly.requested { return }
+#endif
 #if SHOOT || DEBUG
         if ShootSimulation.requestedMode != nil { return }
 #endif
@@ -179,7 +209,12 @@ final class CaptionState {
     }
     /// 字幕内容：both = 原文 + 译文；translation = 仅译文；source = 仅原文（转写）
     var captionDisplay: String = UserDefaults.standard.string(forKey: "captionDisplay") ?? "both" {
-        didSet { UserDefaults.standard.set(captionDisplay, forKey: "captionDisplay") }
+        didSet {
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { return }
+#endif
+            UserDefaults.standard.set(captionDisplay, forKey: "captionDisplay")
+        }
     }
     var showSource: Bool { captionDisplay != "translation" }
     var showTranslation: Bool { captionDisplay != "source" }
@@ -210,7 +245,7 @@ final class CaptionState {
     var captionClickThrough: Bool = UserDefaults.standard.bool(forKey: "captionClickThrough") {
         didSet { UserDefaults.standard.set(captionClickThrough, forKey: "captionClickThrough"); CaptionPanelController.shared.applyAppearance() }
     }
-    /// 字幕窗在屏幕共享 / 录屏里是否可见（默认不可见：一边看字幕一边共享屏幕，字幕不能漏给对方）
+    /// Legacy capture preference; turning it off does not guarantee sharing exclusion.
     var captionsVisibleInScreenShare: Bool = UserDefaults.standard.bool(forKey: "captionsInScreenShare") {
         didSet { UserDefaults.standard.set(captionsVisibleInScreenShare, forKey: "captionsInScreenShare"); CaptionPanelController.shared.applySharing() }
     }
@@ -278,6 +313,7 @@ final class CaptionState {
                 guard let self, self.running else { return }
                 self.pollTick += 1
                 if !self.paused { self.pollMeter() }
+                self.updateTranslationConnectivity()
                 if self.pollTick % 8 == 0 {
                     if self.captionMode == .auto { self.applyPlacement() }
                     if self.effectiveMode == .video { CaptionPanelController.shared.followSourceIfMoved() }
@@ -295,24 +331,117 @@ final class CaptionState {
     var pendingEn: String = "" {   // 未翻的定稿尾巴 + volatile 未定稿
         didSet { if pendingEn.isEmpty { pendingClock = PendingTextClock() } }
     }
-    var running = false
+    var running = false { didSet { updateTranslationConnectivity() } }
     var starting = false           // start() 已发出、tap/引擎尚未就绪：期间再按 = 取消
     private var statusMessage: String?
     // Resolve the idle status after uiLanguage exists, without reading shared during init.
     var status: String {
         get { statusMessage ?? (L10nTables.table(uiLanguage)["就绪"] ?? "就绪") }
-        set { statusMessage = newValue }
+        set {
+            statusMessage = newValue
+            if CaptionStatusCopy.resolve(fullText: newValue, translate: { tr($0) }).isSaveFailure {
+                errorStatusVisibility.receive()
+            }
+        }
     }
-    var errorBanner: CaptionBanner?
+    var errorBanner: CaptionBanner? {
+        didSet { errorStatusVisibility.receive() }
+    }
+    private var errorStatusVisibility = CaptionErrorStatusVisibility()
+    var desktopErrorStatus: CaptionBanner? {
+        guard errorStatusVisibility.isVisible else { return nil }
+        return errorBanner.flatMap { $0.showsStatusLine ? $0 : nil }
+    }
+    func dismissDesktopErrorStatus() {
+        if desktopErrorStatus != nil { errorStatusVisibility.dismiss() }
+        else if audioRepairStatus != nil { audioRepairVisibility.dismiss() }
+        else if CaptionStatusCopy.resolve(fullText: status, translate: { tr($0) }).isSaveFailure { errorStatusVisibility.dismiss() }
+        else { noticeVisibility.dismiss(captionDisplayStatus) }
+    }
+    var translationConnectivity = TranslationConnectivityPolicy()
+    var translationOffline: Bool { translationConnectivity.isOffline }
+    var offlineStatus: CaptionBanner? {
+        translationOffline ? CaptionBanner(text: tr("离线，正在重连"), severity: .info) : nil
+    }
+    var audioInterruption: CaptionAudioInterruption = .none {
+        didSet {
+            if oldValue != audioInterruption { audioRepairVisibility.receive() }
+        }
+    }
+    private var audioRepairVisibility = CaptionErrorStatusVisibility()
+    private var noticeVisibility = CaptionNoticeVisibility()
+    var audioRepairStatus: CaptionBanner? {
+        guard audioRepairVisibility.isVisible, audioInterruption.requiresRepair,
+              let text = audioInterruption.sourceText else { return nil }
+        return CaptionBanner(text: tr(text), action: .openSettings, settingsURL: audioInterruption.settingsURL)
+    }
+    var selectedCaptionError: CaptionBanner? {
+        if var existing = desktopErrorStatus {
+            // Keep KK-034's error text first. A known capture cause makes Fix
+            // open its settings instead of blindly restarting capture.
+            if existing.action == .retry, let repair = audioRepairStatus {
+                existing.action = .openSettings
+                existing.settingsURL = repair.settingsURL
+            }
+            return existing
+        }
+        if let repair = audioRepairStatus { return repair }
+        let copy = CaptionStatusCopy.resolve(fullText: status, translate: { tr($0) })
+        return copy.isSaveFailure && errorStatusVisibility.isVisible ? CaptionBanner(text: status) : nil
+    }
+    var desktopCaptionStatusBanner: CaptionBanner? {
+        noticeVisibility.isVisible(captionDisplayStatus) ? captionStatusBanner : nil
+    }
+    var canDismissDesktopCaptionStatus: Bool {
+        desktopCaptionStatusBanner != nil && captionDisplayStatus != .offline
+    }
+    var captionDisplayStatus: CaptionStatusPriority {
+        CaptionStatusPriority.resolve(hasError: selectedCaptionError != nil,
+            offline: translationOffline, silentTooLong: silentTooLong,
+            audioStalled: audioStalled, running: running, paused: paused,
+            sourceOnly: CaptionStatusCopy.resolve(fullText: selectedCaptionError?.text ?? status, translate: { tr($0) }).isSourceOnly)
+    }
+    var captionStatusText: String {
+        if captionDisplayStatus == .error || captionDisplayStatus == .sourceOnly { return selectedCaptionError?.text ?? status }
+        return captionDisplayStatus.sourceText.map { tr($0) } ?? status
+    }
+    var captionStatusShortText: String { CaptionStatusCopy.resolve(fullText: captionStatusText, translate: { tr($0) }).shortText }
+    var captionStatusBanner: CaptionBanner? {
+        if captionDisplayStatus == .error { return selectedCaptionError }
+        // Presentation only: keep the original banner action for menu/full error UI.
+        if captionDisplayStatus == .sourceOnly { return CaptionBanner(text: captionStatusText, severity: .info) }
+        return captionDisplayStatus.isWarning ? CaptionBanner(text: captionStatusText, severity: .info) : nil
+    }
+    private var connectivityAvailable: Bool {
+        running && !paused && !translationPaused && (!useProxy || !sessionToken.isEmpty)
+    }
+    private var connectivityEnabled: Bool {
+        connectivityAvailable && (rateLimitedUntil.map { $0 <= Date() } ?? true)
+    }
+    private func updateTranslationConnectivity() {
+        translationConnectivity.advance(audioTime: meter.snapshot().audibleTime, enabled: connectivityEnabled)
+    }
+    private func translationSucceeded() {
+        updateTranslationConnectivity()
+        translationConnectivity.succeeded(audioTime: meter.snapshot().audibleTime)
+    }
+    private func translationFailed(chunk: UUID?) {
+        updateTranslationConnectivity()
+        if let chunk { translationConnectivity.failed(chunk: chunk, enabled: connectivityAvailable) }
+    }
     /// 翻译暂停（额度用完 / 需订阅 / 会话失效）：继续转写显示原文，不再发请求
-    var translationPaused = false
+    var translationPaused = false { didSet { updateTranslationConnectivity() } }
     enum PauseReason { case quota, payment, freePool, session }
     private(set) var pauseReason: PauseReason?
     private var pausedAt: Date?
     private func pause(_ r: PauseReason) { translationPaused = true; pauseReason = r; pausedAt = Date() }
+    #if SHOOT || DEBUG
+    func simulateTranslationPause(_ reason: PauseReason) { pause(reason) }
+#endif
     private func unpause() { translationPaused = false; pauseReason = nil; pausedAt = nil }
     /// 会话代数：stop/start 各 +1；异步回调用它判断自己是否已过期
     private var sessionGen = 0
+    var sessionGeneration: Int { sessionGen }
     @ObservationIgnored private let transcriptWriter = TranscriptWriter()
     @ObservationIgnored private let meetingSessionContext = MeetingSessionContext()
     @ObservationIgnored private let meetingSummaryStore = MeetingSummaryStore()
@@ -320,9 +449,9 @@ final class CaptionState {
         client: MeetingSummaryClient(
             sessionToken: { SessionTokenStore.load() },
             baseURL: {
-                let raw = UserDefaults.standard.string(forKey: "proxyURL") ?? "https://api.kikishima.com"
+                let raw = UserDefaults.standard.string(forKey: "proxyURL") ?? SessionControls.defaultAPI
                 return URL(string: SessionControls.resolvedAPIBase(raw))
-                    ?? URL(string: SessionControls.productionAPI)!
+                    ?? URL(string: SessionControls.defaultAPI)!
             }
         ),
         store: meetingSummaryStore,
@@ -426,23 +555,19 @@ final class CaptionState {
     }
     var islandAutoCollapseSeconds: Double { CaptionAppearance.collapseSeconds(CaptionCollapseLevel(rawValue: islandCollapseLevel) ?? .medium) }
     var islandDormant = false   // 自动收回中（有新句就翻回 false）
-    var islandSettingsOpen = false {
-        didSet {
-            guard oldValue != islandSettingsOpen else { return }
-            // 操作期间保留字幕岛；关卡后重新给足阅读时间。
-            IslandNotchController.shared.noteActivity()
-        }
-    }
     var wantsIslandExpanded: Bool {
-        CaptionAppearance.wantsExpanded(hasContent: hasIslandContent, dormant: islandDormant,
-            settingsOpen: islandSettingsOpen, paused: paused, hasBanner: errorBanner != nil)
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedIslandExpanded { return true }
+#endif
+        return CaptionAppearance.wantsExpanded(hasContent: hasIslandContent, dormant: islandDormant,
+            paused: paused, hasBanner: errorBanner != nil)
     }
     var model: String = UserDefaults.standard.string(forKey: "model") ?? "gpt-5.6-luna" {
         didSet {
 #if SHOOT || DEBUG
             if ShootSimulation.requestedMode != nil { return }
 #endif
- UserDefaults.standard.set(model, forKey: "model"); translator.model = model }
+ UserDefaults.standard.set(model, forKey: "model"); if !finishingCaptions { translator.model = model } }
     }
     var localeID: String = UserDefaults.standard.string(forKey: "locale") ?? "en_US" {
         didSet { UserDefaults.standard.set(localeID, forKey: "locale") }
@@ -464,7 +589,7 @@ final class CaptionState {
     var autoDownloadModels: Bool = UserDefaults.standard.object(forKey: "autoDownloadModels") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(autoDownloadModels, forKey: "autoDownloadModels")
-            if autoDownloadModels { predownloadModels(meetingLocales) } else { predownloadTask?.cancel(); predownloadTask = nil; for (k, v) in modelProgress where v < 1 { modelProgress[k] = nil } }
+            if autoDownloadModels { predownloadModels(OnboardingController.needed ? [localeID] : meetingLocales) } else { predownloadTask?.cancel(); predownloadTask = nil; for (k, v) in modelProgress where v < 1 { modelProgress[k] = nil } }
         }
     }
     /// 只认系统实际安装的模型；进度完成或选中了语言均不能代替安装状态。
@@ -531,7 +656,7 @@ final class CaptionState {
 
             UserDefaults.standard.set(glossary, forKey: "glossary")
             meetingSessionContext.updatePermanentGlossary(glossary)
-            translator.glossary = meetingSessionContext.effectiveGlossary
+            if !finishingCaptions { translator.glossary = meetingSessionContext.effectiveGlossary }
         }
     }
     // 目标语言（英文名进 prompt）
@@ -540,7 +665,7 @@ final class CaptionState {
 #if SHOOT || DEBUG
             if ShootSimulation.requestedMode != nil { return }
 #endif
- UserDefaults.standard.set(targetLang, forKey: "targetLang"); translator.targetLanguage = targetLang }
+ UserDefaults.standard.set(targetLang, forKey: "targetLang"); if !finishingCaptions { translator.targetLanguage = targetLang } }
     }
     var summaryConsent: MeetingSummaryConsent = MeetingSummaryConsent(
         rawValue: UserDefaults.standard.string(forKey: "meetingSummaryConsent") ?? ""
@@ -566,7 +691,7 @@ final class CaptionState {
 #endif
  UserDefaults.standard.set(useProxy, forKey: "useProxy"); translator.useProxy = useProxy }
     }
-    var proxyURL: String = SessionControls.resolvedAPIBase(UserDefaults.standard.string(forKey: "proxyURL") ?? SessionControls.productionAPI) {
+    var proxyURL: String = SessionControls.resolvedAPIBase(UserDefaults.standard.string(forKey: "proxyURL") ?? SessionControls.defaultAPI) {
         didSet {
 #if SHOOT || DEBUG
             if ShootSimulation.requestedMode != nil { return }
@@ -587,24 +712,40 @@ final class CaptionState {
 #if SHOOT || DEBUG
             if ShootSimulation.requestedMode != nil { return }
 #endif
- authGeneration += 1; SessionTokenStore.save(sessionToken); translator.sessionToken = sessionToken }
+            authGeneration += 1
+            transcriptRetryTask?.cancel()
+            transcriptRetryTranslator?.cancelAll()
+            if finishingCaptions { stopTask?.cancel() }
+            resetBillingState()
+            SessionTokenStore.save(sessionToken); translator.sessionToken = sessionToken
+        }
     }
-    var plan: String = UserDefaults.standard.string(forKey: "plan") ?? "" {
-        didSet { UserDefaults.standard.set(plan, forKey: "plan") }
+    var plan: String = AccountPreferences.string(forKey: "plan") ?? "" {
+        didSet { AccountPreferences.set(plan, forKey: "plan") }
     }
-    var planExpires: String? = UserDefaults.standard.string(forKey: "planExpires") {
-        didSet { UserDefaults.standard.set(planExpires, forKey: "planExpires") }
+    var planExpires: String? = AccountPreferences.string(forKey: "planExpires") {
+        didSet { AccountPreferences.set(planExpires, forKey: "planExpires") }
     }
     var activating = false
     var activationError = ""
     /// 登录账号邮箱（邮箱验证码 / Google / Apple 三种入口统一到邮箱）
-    var accountEmail: String = UserDefaults.standard.string(forKey: "accountEmail") ?? "" {
-        didSet { UserDefaults.standard.set(accountEmail, forKey: "accountEmail") }
+    var accountEmail: String = AccountPreferences.string(forKey: "accountEmail") ?? "" {
+        didSet { AccountPreferences.set(accountEmail, forKey: "accountEmail") }
     }
     /// 验证码已发出，等用户输入
     var codeSent = false
     var usageTokens = 0
     var usageQuota = 0
+    // Menu-only account action: actual quota exhaustion, never ordinary free upsell.
+    var menuShowsLogin: Bool { sessionToken.isEmpty }
+    var menuShowsUpgrade: Bool {
+        !sessionToken.isEmpty && PlanQuotaPolicy.showsQuota(plan: plan)
+            && !paused && captionDisplayStatus != .error
+            && (pauseReason == .quota || pauseReason == .freePool
+                || (usageQuota > 0 && usageTokens >= usageQuota)
+                || status == tr("额度已用完 · 仅转写") || status == tr("免费额度今日用尽 · 仅转写"))
+    }
+
     /// 剩余分钟（240000 token ≈ 60 分钟 → 4000 token/分钟）；未知时 nil
     var remainingMinutes: Int? {
         PlanQuotaPolicy.remainingMinutes(plan: plan, tokens: usageTokens, quota: usageQuota)
@@ -612,9 +753,9 @@ final class CaptionState {
 
     /// 每台安装一个随机 ID，代替电脑名（电脑名常含用户真名）
     static let installID: String = {
-        if let s = UserDefaults.standard.string(forKey: "installID"), !s.isEmpty { return s }
+        if let s = AccountPreferences.string(forKey: "installID"), !s.isEmpty { return s }
         let s = UUID().uuidString
-        UserDefaults.standard.set(s, forKey: "installID")
+        AccountPreferences.set(s, forKey: "installID")
         return s
     }()
     private var deviceLabel: String { "Mac-\(Self.installID.prefix(8))" }
@@ -654,7 +795,9 @@ final class CaptionState {
     }
     private func beginAuthRequest() -> AuthRequestContext {
         authGeneration += 1
+        cancelBillingRequests()
         pendingWebState = nil
+        pendingWebVerifier = nil
         signInTimeout?.cancel(); signInTimeout = nil
         return authContext()
     }
@@ -743,8 +886,10 @@ final class CaptionState {
     /// 取消进行中的第三方登录（浏览器没回来 / 点错了）：按钮马上恢复
     func cancelSignIn() {
         authGeneration += 1
+        cancelBillingRequests()
         signInTimeout?.cancel(); signInTimeout = nil
         pendingWebState = nil
+        pendingWebVerifier = nil
         activating = false
         activationError = ""
         if !running { status = trAny("就绪") }
@@ -767,12 +912,8 @@ final class CaptionState {
 
     /// Apple 登录：有原生权利走 ASAuthorization；否则开浏览器走服务器的网页流程，回跳 kikishima:// 深链
     private var pendingWebState: String?
+    private var pendingWebVerifier: String?
     private var signInTimeout: Task<Void, Never>?
-    private static func randomState() -> String {
-        var bytes = [UInt8](repeating: 0, count: 16)
-        _ = SecRandomCopyBytes(kSecRandomDefault, 16, &bytes)
-        return Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-    }
 
     func signInWithApple() {
 #if SHOOT || DEBUG
@@ -807,11 +948,15 @@ final class CaptionState {
               c.scheme == "https" || c.scheme == "http", c.host != nil else {
             activationError = tr("服务器地址无效"); return
         }
-        let st = Self.randomState()
-        c.queryItems = [URLQueryItem(name: "device", value: deviceLabel), URLQueryItem(name: "state", value: st)]
+        guard let proof = BrowserLoginProof.generate() else { activationError = tr("登录凭证无效，重试一次"); return }
+        let st = proof.state
+        c.queryItems = [URLQueryItem(name: "device", value: deviceLabel), URLQueryItem(name: "state", value: st),
+                        URLQueryItem(name: "code_challenge", value: proof.challenge),
+                        URLQueryItem(name: "code_challenge_method", value: "S256")]
         guard let url = c.url else { activationError = tr("服务器地址无效"); return }
         let context = beginAuthRequest()
         pendingWebState = st
+        pendingWebVerifier = proof.verifier
         activationError = ""; activating = true
         status = provider == "google" ? tr("已在浏览器打开 Google 登录…") : tr("已在浏览器打开 Apple 登录…")
         NSWorkspace.shared.open(url)
@@ -826,6 +971,7 @@ final class CaptionState {
         guard authIsCurrent(context), activating, pendingWebState == state else { return }
         authGeneration += 1
         activating = false; pendingWebState = nil
+        pendingWebVerifier = nil
         signInTimeout = nil
         activationError = tr("登录超时，请重试")
     }
@@ -834,8 +980,10 @@ final class CaptionState {
     func handleAuthCallback(_ url: URL) {
         guard url.scheme == "kikishima", url.host == "signed-in", let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return }
         let q = Dictionary(items.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { a, _ in a })
-        guard let expected = pendingWebState, !expected.isEmpty, q["state"] == expected else { return }   // 不是我们发出去的：忽略
+        guard let expected = pendingWebState, !expected.isEmpty, q["state"] == expected,
+              let verifier = pendingWebVerifier else { return }   // 不是我们发出去的：忽略
         pendingWebState = nil
+        pendingWebVerifier = nil
         signInTimeout?.cancel(); signInTimeout = nil
         if let err = q["error"], !err.isEmpty {
             activating = false
@@ -848,7 +996,7 @@ final class CaptionState {
         Task {
             guard authIsCurrent(context) else { return }
             defer { if authGeneration == context.epoch { activating = false } }
-            if let json = await postAuth("/auth/handoff", ["code": code], context: context), authIsCurrent(context) { acceptSession(json) }
+            if let json = await postAuth("/auth/handoff", ["code": code, "code_verifier": verifier], context: context), authIsCurrent(context) { acceptSession(json) }
         }
     }
 
@@ -865,26 +1013,79 @@ final class CaptionState {
         }
     }
 
-    /// Polar 结账链接（月付 / 年付二选一，含 7 天试用），预填当前账号邮箱，付完 webhook 自动升 Pro
-    static let checkoutBase = "https://buy.polar.sh/polar_cl_5YfqHr8odzwwxcyVuttv1KGCdDrT82PgloJ6q41aKkh"
-    var upgradeURL: URL {
-        var c = URLComponents(string: Self.checkoutBase)!
-        if !accountEmail.isEmpty { c.queryItems = [URLQueryItem(name: "customer_email", value: accountEmail)] }
-        return c.url!
-    }
     private var upgradePollTask: Task<Void, Never>?
-    /// 点「升级 Pro」：开结账页，随后 10 分钟内轮询 /me（前 2 分钟每 5 秒，之后每 15 秒；输卡号 + 3DS 常超过 2 分钟），付完不用手动刷新
-    func openUpgrade() {
+    private var billingTask: Task<Void, Never>?
+    private var planRefreshTask: Task<Void, Never>?
+    private var planRequestGeneration = 0
+    var billingBusy = false
+    var billingError = ""
+
+    private func cancelBillingRequests() {
+        billingTask?.cancel(); billingTask = nil
+        upgradePollTask?.cancel(); upgradePollTask = nil
+        planRefreshTask?.cancel(); planRefreshTask = nil
+        planRequestGeneration += 1
+        billingBusy = false; billingError = ""
+    }
+
+    private func resetBillingState() {
+        cancelBillingRequests()
+        billingBusy = false; billingError = ""; lastPlanRefresh = nil
+        subscriptionStatus = ""; subscriptionExpires = nil; planExpires = nil
+        usageTokens = 0; usageQuota = 0; quotaResetAt = nil
+    }
+
+    private func showBillingError(_ code: String) {
+        billingError = BillingPolicy.errorText(code)
+        AppDelegate.enter(section: .settings)
+    }
+
+    func openUpgrade() { openBilling("checkout") }
+    func openSubscriptionManagement() { openBilling("portal") }
+
+    /// Account identity, product choice and return URL are owned by the server.
+    private func openBilling(_ action: String) {
 #if SHOOT || DEBUG
         if ShootSimulation.requestedMode != nil { return }
 #endif
-        NSWorkspace.shared.open(upgradeURL)
+        guard !billingBusy else { return }
+        guard !sessionToken.isEmpty else { AppDelegate.enter(section: .settings); return }
+        guard let url = URL(string: proxyURL.trimmingCharacters(in: .init(charactersIn: "/")) + "/billing/" + action) else { return }
+        cancelBillingRequests()
+        let context = authContext(), token = sessionToken
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"; req.httpBody = Data("{}".utf8); req.timeoutInterval = 20
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        billingBusy = true; billingError = ""
+        billingTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if authGeneration == context.epoch, token == sessionToken { billingBusy = false; billingTask = nil } }
+            do {
+                let (data, response) = try await Translator.session.data(for: req)
+                guard !Task.isCancelled, authIsCurrent(context), token == sessionToken else { return }
+                let http = response as? HTTPURLResponse
+                let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+                if http?.statusCode == 401 { sessionExpired(); return }
+                guard http?.statusCode == 200, let link = BillingPolicy.browserURL(json["url"] as? String) else {
+                    showBillingError(json["error"] as? String ?? "billing_invalid_response"); return
+                }
+                guard NSWorkspace.shared.open(link) else { showBillingError("billing_unavailable"); return }
+                startBillingPoll(context: context, token: token, checkout: action == "checkout")
+            } catch {
+                guard !Task.isCancelled, authIsCurrent(context), token == sessionToken else { return }
+                showBillingError("billing_unavailable")
+            }
+        }
+    }
+
+    private func startBillingPoll(context: AuthRequestContext, token: String, checkout: Bool) {
         upgradePollTask?.cancel()
         upgradePollTask = Task { [weak self] in
             for i in 0..<56 {
                 try? await Task.sleep(for: .seconds(i < 24 ? 5 : 15))
-                guard let self, !Task.isCancelled else { return }
-                if self.plan == "pro" { return }
+                guard let self, !Task.isCancelled, self.authIsCurrent(context), token == self.sessionToken else { return }
+                if checkout && self.plan == "pro" { return }
                 self.refreshPlan()
             }
         }
@@ -909,27 +1110,61 @@ final class CaptionState {
 #if SHOOT || DEBUG
         if ShootSimulation.requestedMode != nil { return }
 #endif
+        refreshPlan(restoring: false)
+    }
+
+    func restorePurchases() {
+#if SHOOT || DEBUG
+        if ShootSimulation.requestedMode != nil { return }
+#endif
+        refreshPlan(restoring: true)
+    }
+
+    private func refreshPlan(restoring: Bool) {
         guard !sessionToken.isEmpty, plan != "dev" else { return }
-        guard let url = URL(string: proxyURL.trimmingCharacters(in: .init(charactersIn: "/")) + "/me") else { return }
+        guard !billingBusy else { return }
+        if !restoring && planRefreshTask != nil { return }
+        let path = restoring ? "/billing/refresh" : "/me"
+        guard let url = URL(string: proxyURL.trimmingCharacters(in: .init(charactersIn: "/")) + path) else { return }
         var req = URLRequest(url: url)
-        req.timeoutInterval = 15
+        req.timeoutInterval = 20
+        if restoring {
+            req.httpMethod = "POST"; req.httpBody = Data("{}".utf8)
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            billingBusy = true; billingError = ""
+        }
         let context = authContext()
         let token = sessionToken   // 请求发出时的 token：回来时若已换号/登出则丢弃结果
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        Task {
-            guard let (data, resp) = try? await Translator.session.data(for: req), let http = resp as? HTTPURLResponse else { return }
-            guard authIsCurrent(context), token == sessionToken else { return }
+        planRefreshTask?.cancel()
+        planRequestGeneration += 1
+        let requestGeneration = planRequestGeneration
+        planRefreshTask = Task {
+            defer {
+                if requestGeneration == planRequestGeneration, authGeneration == context.epoch, token == sessionToken {
+                    planRefreshTask = nil
+                    if restoring { billingBusy = false }
+                }
+            }
+            let result = try? await Translator.session.data(for: req)
+            guard !Task.isCancelled, requestGeneration == planRequestGeneration, authIsCurrent(context), token == sessionToken else { return }
+            guard let (data, resp) = result, let http = resp as? HTTPURLResponse else {
+                if restoring { showBillingError("billing_unavailable") }; return
+            }
             if http.statusCode == 401 { sessionExpired(); return }
-            guard http.statusCode == 200, let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
-            if let p = json["plan"] as? String, p != plan { plan = p }
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            guard http.statusCode == 200, let p = json["plan"] as? String, ["free", "pro", "none"].contains(p) else {
+                if restoring { showBillingError(json["error"] as? String ?? "billing_invalid_response") }; return
+            }
+            if p != plan { plan = p }
             if let e = json["email"] as? String, !e.isEmpty { accountEmail = e }
-            if let t = json["tokens"] as? Int, let q = json["quota"] as? Int { usageTokens = t; usageQuota = q }
+            usageTokens = json["tokens"] as? Int ?? 0; usageQuota = json["quota"] as? Int ?? 0
             if let r = json["resetAt"] as? String { quotaResetAt = Self.parseISO(r) }
             if let sub = json["subscription"] as? [String: Any] {
                 subscriptionStatus = sub["status"] as? String ?? ""
                 subscriptionExpires = (sub["expiresAt"] as? String).flatMap { Self.parseISO($0) }
                 planExpires = (sub["expiresAt"] as? String).map { String($0.prefix(10)) }
-            } else { subscriptionStatus = ""; subscriptionExpires = nil }
+            } else { subscriptionStatus = ""; subscriptionExpires = nil; planExpires = nil }
             lastPlanRefresh = Date()
             // 额度恢复（新的一周 / 升级）后自动解除暂停；免费池日限要到第二天或升 Pro
             if translationPaused, let reason = pauseReason {
@@ -1016,13 +1251,13 @@ final class CaptionState {
         activating = true; activationError = ""
         var payload: [String: Any] = ["licenseKey": trimmedKey, "device": deviceLabel]
         // 已在本机激活过则带上 activationId，只验证不重复激活（保护设备名额）
-        if let a = UserDefaults.standard.string(forKey: "activationId"), !a.isEmpty { payload["activationId"] = a }
+        if let a = AccountPreferences.string(forKey: "activationId"), !a.isEmpty { payload["activationId"] = a }
         let context = beginAuthRequest()
         Task {
             guard authIsCurrent(context) else { return }
             defer { if authGeneration == context.epoch { activating = false } }
             if let json = await postAuth("/auth/license", payload, context: context), authIsCurrent(context) {
-                if let a = json["activationId"] as? String { UserDefaults.standard.set(a, forKey: "activationId") }
+                if let a = json["activationId"] as? String { AccountPreferences.set(a, forKey: "activationId") }
                 acceptSession(json)
             }
         }
@@ -1034,10 +1269,12 @@ final class CaptionState {
         case .login, .upgrade:
             AppDelegate.enter()
         case .retry:
-            errorBanner = nil
+            if finishingCaptions { return }
+            // retry now belongs only to actionable capture/engine errors.
+            // Incomplete translations must not redirect Fix into transcript retry.
             if !running && !starting { toggle(); return }          // 启动失败 / 已停止：重新开始
             if !tap.isRunning {                                     // 设备切换后 tap 没起来：再试一次
-                do { try startTap(); status = tr("音频已恢复") }
+                do { try startTap(); status = tr("音频已恢复"); errorBanner = nil }
                 catch { errorBanner = CaptionBanner(text: tr("音频仍无法捕获：%@", error.localizedDescription), action: .retry) }
                 return
             }
@@ -1046,7 +1283,7 @@ final class CaptionState {
             }
             if pauseReason == nil { retryFailedChunks() } else { refreshPlan() }
         case .openSettings:
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
+            if let url = URL(string: selectedCaptionError?.settingsURL ?? "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
                 NSWorkspace.shared.open(url)
             }
         }
@@ -1057,7 +1294,7 @@ final class CaptionState {
 #if SHOOT || DEBUG
     @ObservationIgnored private lazy var translator = Translator()
 #else
-    private let translator = Translator()
+    private var translator = Translator()
 #endif
 
     // Apple 本地机翻草稿层：session 只能活在 translationTask 闭包里，用流转发请求
@@ -1112,10 +1349,13 @@ final class CaptionState {
     // 延迟仪表（调试用，菜单不再显示毫秒）
     private(set) var lastDraftMs: Int?
     private(set) var lastFinalMs: Int?
-    private let timingRecorder = TranslationTimingRecorder()
+    private let timingRecorder = TranslationTimingRecorder.shared
     private var pendingClock = PendingTextClock()
     private var sourceLedger = TranslationSourceLedger()
+    private var asrSourceLedger: ASRSourceLedger?
     private var activeTranslationAttempts: [UUID: UUID] = [:]
+    @ObservationIgnored private var translationCallbackContinuation: AsyncStream<TranslationCallbackEvent>.Continuation?
+    @ObservationIgnored private var translationCallbackTask: Task<Void, Never>?
 
     /// Compress only adjacent identical pure acknowledgements in a short window.
     /// Original records retain every source chunk; a question/content/marker resets it.
@@ -1169,16 +1409,24 @@ final class CaptionState {
             stop()
             CaptionPanelController.shared.hide()
         case .start:
-            if start() {
-                CaptionPanelController.shared.show()
-                applyPlacement(always: true)   // 按场景摆一次，但尊重用户上次拖到的位置
-                startMicPolling()
-            }
+            startCaptionSession()
         }
     }
 
+    /// Trial and normal UI starts share the meter/silence lifecycle.
+    @discardableResult
+    func startCaptionSession(showPanel: Bool = true) -> Bool {
+        guard start() else { return false }
+        if showPanel {
+            CaptionPanelController.shared.show()
+            applyPlacement(always: true)
+        }
+        startMicPolling()
+        return true
+    }
+
     // ==== 会中暂停 / 继续：休息、私聊、不想被记的片段。不结束会话、记录不切成两个文件 ====
-    var paused = false
+    var paused = false { didSet { updateTranslationConnectivity() } }
     /// True while resume() is restarting the transcriber; a second Continue must no-op.
     private(set) var resuming = false
     private(set) var switchingMeetingLanguage = false
@@ -1228,6 +1476,7 @@ final class CaptionState {
         marker.isMarker = true
         chunks.append(marker)
         committedEn = ""; volatileEn = ""; doneChars = 0; pendingEn = ""; sourceLedger = TranslationSourceLedger()
+        asrSourceLedger = nil
         status = tr("继续中…")
         resumeTask = Task {
             defer {
@@ -1300,6 +1549,7 @@ final class CaptionState {
         // Reset the ledger now, not after the new engine starts. tickChunks can
         // fire on the next runloop while the model is still downloading.
         committedEn = ""; doneChars = 0; pendingEn = ""; sourceLedger = TranslationSourceLedger()
+        asrSourceLedger = nil
         audioLevel = 0; silentTooLong = false; audioStalled = false
 
         languageSwitchTask = Task {
@@ -1325,6 +1575,7 @@ final class CaptionState {
                     chunks.append(marker)
                 }
                 committedEn = ""; volatileEn = ""; doneChars = 0; pendingEn = ""; sourceLedger = TranslationSourceLedger()
+                asrSourceLedger = nil
                 meter.reset()
                 try startTap()
                 switchingMeetingLanguage = false
@@ -1340,7 +1591,6 @@ final class CaptionState {
                     return
                 }
                 switchingMeetingLanguage = false
-                errorBanner = CaptionBanner(text: tr("切换会议语言失败：%@", error.localizedDescription))
                 stop(reason: tr("切换会议语言失败，字幕已停止"))
             }
         }
@@ -1349,10 +1599,8 @@ final class CaptionState {
     // ==== 为浏览器扩展做的实时听译：网页没有字幕轨时，app 听系统声音翻译，结果推回网页原地显示 ====
     /// 为扩展开实时听译。spoken = 网页指定的原声语言（转写 locale，如 ja_JP），target = 网页选的译文语言；空则沿用 app 的设置
     /// 用户自己已经在开着字幕时不抢：回一个 busy，网页显示提示
-    /// 网页视频听译用本机翻译以降低延迟；会议字幕仍走 GPT
-    var localForVideo = UserDefaults.standard.object(forKey: "localForVideo") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(localForVideo, forKey: "localForVideo") }
-    }
+    /// The same constraint applies to video too; ignore legacy preferences.
+    let localForVideo = false
     func startLiveForExtension(title: String, spoken: String = "", target: String = "") {
         guard !sessionToken.isEmpty else { pushStatus(["kind": "status", "state": "error", "error": "unauthorized"]); return }
         if (running || starting) && !captionsToExtension {
@@ -1436,7 +1684,7 @@ final class CaptionState {
         if ShootSimulation.requestedMode != nil { ShootSimulation.start(self); return true }
 #endif
         guard !running, !starting else { return false }
-        if drainingTranscription { status = tr("上一次启动还在收尾，请稍后再试"); return false }
+        if finishingCaptions { status = tr("已停止采音，正在完成最后一句…"); return false }
         if !SessionControls.canStartNewMeeting(
             previousStartInFlight: startTask != nil,
             previousTranscriptPending: finalTranscriptTask != nil
@@ -1461,11 +1709,14 @@ final class CaptionState {
         let epoch = engineEpoch
         engineRestarts = 0; lastRestartAt = nil
         timingRecorder.clearAttempts()
+        timingRecorder.beginSession()
         pendingClock = PendingTextClock()
         chunks = []; committedEn = ""; doneChars = 0; volatileEn = ""; pendingEn = ""; sourceLedger = TranslationSourceLedger(); activeTranslationAttempts = [:]
+        asrSourceLedger = nil
         translationRetryQueue = TranslationRetryQueue(); inflight = 0; rateLimitedUntil = nil
         if pauseReason != .session { unpause() }
-        errorBanner = nil
+        // Keep capture errors visible until the replacement engine and tap work.
+        if errorBanner?.action != .retry && errorBanner?.action != .openSettings { errorBanner = nil }
         lastDraftMs = nil; lastFinalMs = nil
         let startedAt = Date()
         sessionStartedAt = startedAt
@@ -1489,18 +1740,35 @@ final class CaptionState {
         resumeStart.end()
         resuming = false
         languageSwitchTask?.cancel(); languageSwitchTask = nil
+        translationConnectivity = TranslationConnectivityPolicy()
         meter.reset(); audioLevel = 0; silentTooLong = false; audioStalled = false
+        // Old requests retain their old callbacks, including failures.
+        translator.cancelAll()
+        translator = Translator(costSessionID: meetingSummaryRecordID.flatMap(UUID.init(uuidString:)) ?? UUID())
         translator.model = model
         translator.glossary = meetingSessionContext.effectiveGlossary
         translator.targetLanguage = targetLang
         translator.useProxy = useProxy
         translator.proxyURL = proxyURL
         translator.sessionToken = sessionToken
-        translator.onStatus = { msg in Task { @MainActor in
-            let s = CaptionState.shared
-            if (s.running || s.starting), !s.switchingMeetingLanguage { s.status = msg }
-        } }
-        translator.onFailure = { f in Task { @MainActor in CaptionState.shared.handleFailure(f) } }
+        translationCallbackContinuation?.finish()
+        translationCallbackTask?.cancel()
+        let callbacks = AsyncStream<TranslationCallbackEvent>.makeStream()
+        let continuation = callbacks.continuation
+        translationCallbackContinuation = continuation
+        translator.onStatus = { msg in
+            guard let request = TranslationConnectivityRequest.current else { return }
+            continuation.yield(.status(request, msg))
+        }
+        translator.onFailure = { f in
+            guard let request = TranslationConnectivityRequest.current else { return }
+            continuation.yield(.failure(request, f))
+        }
+        translationCallbackTask = Task { @MainActor [weak self] in
+            guard let s = self else { return }
+            guard s.sessionGen == gen else { return }
+            await s.consumeTranslationCallbacks(callbacks.stream, generation: gen)
+        }
         translator.reset()
         translationConfig = nil   // 本地翻译草稿已永久关闭（见 instantDraft）
         pendingDraft = ""; lastDraftReq = nil
@@ -1523,6 +1791,7 @@ final class CaptionState {
                 try Task.checkCancellation()
                 running = true
                 starting = false
+                if errorBanner?.action == .retry || errorBanner?.action == .openSettings { errorBanner = nil }
                 activityToken = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Live captions")
                 let t = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in Task { @MainActor in self?.tickChunks() } }
                 RunLoop.main.add(t, forMode: .common)   // 拖窗口时也走 tick
@@ -1559,11 +1828,31 @@ final class CaptionState {
 
     /// 音频电平（0~1）与静音 / 停摆判定：音频线程通过锁写入 meter，主线程 timer 每 0.25 秒读一次写进这三个可观察属性
     var audioLevel: Double = 0
-    var silentTooLong = false     // 运行中连续 20 秒没声音（会议本来有安静段，只改状态行不弹横幅）
-    var audioStalled = false      // IO 回调本身停了 5 秒以上（设备被拔 / 聚合设备卡死而默认设备没变，之前这种情况反而报不出来）
+    var silentTooLong = false {
+        didSet { noticeVisibility.receive(silent: silentTooLong, stopped: audioStalled) }
+    }     // 运行中连续 20 秒没声音（会议本来有安静段，只改状态行不弹横幅）
+    var audioStalled = false {
+        didSet { noticeVisibility.receive(silent: silentTooLong, stopped: audioStalled) }
+    }      // IO 回调本身停了 5 秒以上（设备被拔 / 聚合设备卡死而默认设备没变，之前这种情况反而报不出来）
     private let meter = AudioMeter()
 
+    private var audioPermissionFailed = false
+    private var rebuildingAudioTap = false
     private func startTap() throws {
+        do {
+            try startTapCapture()
+            audioPermissionFailed = false
+            rebuildingAudioTap = false
+            audioInterruption = .none
+        } catch {
+            audioPermissionFailed = (error as? AudioTapError)?.isPermission == true
+            audioInterruption = CaptionAudioInterruption.resolve(ioStopped: true, rebuilding: rebuildingAudioTap,
+                hasUsableDevice: AudioDevices.defaultOutput() != nil || !AudioDevices.outputDevices().isEmpty,
+                systemPermissionFailed: audioPermissionFailed)
+            throw error
+        }
+    }
+    private func startTapCapture() throws {
         var format: AVAudioFormat?
         let meter = self.meter, engine = self.engine, tap = self.tap
         try tap.start { _, inInputData, _, _, _ in
@@ -1579,8 +1868,12 @@ final class CaptionState {
         let now = CFAbsoluteTimeGetCurrent()
         let sample = meter.snapshot()
         audioLevel = sample.level
-        audioStalled = sample.lastIOAt > 0 && now - sample.lastIOAt > 5
-        silentTooLong = !audioStalled && sample.lastLoudAt > 0 && now - sample.lastLoudAt > 20
+        let ioStopped = sample.lastIOAt > 0 && now - sample.lastIOAt > 5
+        audioInterruption = CaptionAudioInterruption.resolve(ioStopped: ioStopped, rebuilding: rebuildingAudioTap,
+            hasUsableDevice: AudioDevices.defaultOutput() != nil || !AudioDevices.outputDevices().isEmpty,
+            systemPermissionFailed: audioPermissionFailed)
+        audioStalled = audioInterruption == .recovering
+        silentTooLong = sample.lastLoudAt > 0 && now - sample.lastLoudAt > 20
     }
 
     /// 默认输出设备变了：只重建 tap（转写引擎与已出字幕都保留），0.6 秒去抖
@@ -1591,6 +1884,7 @@ final class CaptionState {
             switchingMeetingLanguage: switchingMeetingLanguage, tapAlreadyRunning: false
         ) else { return }
         deviceChangeWork?.cancel()
+        rebuildingAudioTap = true
         let w = DispatchWorkItem { [weak self] in
             guard let self, SessionControls.shouldRebuildAudioTap(
                 running: self.running, paused: self.paused, resuming: self.resuming,
@@ -1622,13 +1916,19 @@ final class CaptionState {
     }
 
     private var drainingTranscription = false
+    private(set) var finishingCaptions = false
+    private var stopTask: Task<Void, Never>?
 
     /// reason: nil = 失败路径，不覆盖 status；否则写入 status
     func stop(reason: String? = trAny("已停止")) {
 #if SHOOT || DEBUG
         if ShootSimulation.requestedMode != nil { ShootSimulation.stop(self); return }
 #endif
-        guard !drainingTranscription else { return }
+        guard !finishingCaptions, running || starting else { return }
+        // Capture ends synchronously, before any asynchronous drain.
+        tap.stop()
+        audioLevel = 0; silentTooLong = false; audioStalled = false
+        let deadline = ContinuousClock.now.advanced(by: .seconds(8))
         let generation = sessionGen
         let meetingContextSnapshot = meetingSessionContext.selected
         startTask?.cancel()                   // 不置 nil：由任务自己的 defer 清，start() 在它退出前不重入
@@ -1640,31 +1940,57 @@ final class CaptionState {
         chunkTimer?.invalidate(); chunkTimer = nil
         stopMicPolling()
         deviceChangeWork?.cancel()
-        translator.cancelAll()
-        tap.stop()
         let wasRunning = running
-        if let reason { status = reason }
+        if reason != nil { status = tr("已停止采音，正在完成最后一句…") }
+        finishingCaptions = true
         drainingTranscription = true
         running = false
         starting = false
-        Task { @MainActor in
-            await engine.finish()
-            // finish waits for synchronous event delivery before capturing the final record.
-            drainingTranscription = false
+        stopTask = Task { @MainActor in
+            defer { stopTask = nil }
+            await CaptionFinalization.drain(
+                deadline: deadline,
+                finishASR: { await self.engine.finish() },
+                freezeASR: {
+                    self.drainingTranscription = false
+                    self.engineEpoch += 1
+                    self.engine.stop()
+                },
+                flushTail: { mayTranslate in
+                    if wasRunning { self.flushPendingTail(translate: mayTranslate) }
+                },
+                pumpTranslations: {
+                    self.retryFailedChunks()
+                    return self.inflight > 0 || (!self.translationPaused && self.chunks.contains {
+                        !$0.isMarker && !$0.translationComplete && $0.translationAttempts < 3
+                    })
+                }
+            )
             completeStop(generation: generation, meetingContextSnapshot: meetingContextSnapshot,
                          wasRunning: wasRunning, reason: reason)
         }
     }
 
     private func completeStop(generation: Int, meetingContextSnapshot: MeetingContext?, wasRunning: Bool, reason: String?) {
-        engineEpoch += 1
-        if wasRunning { flushPendingTail(translate: false) }
+        // Revoke attempts before cancellation can enqueue callbacks.
+        activeTranslationAttempts.removeAll()
+        translationCallbackContinuation?.finish()
+        translationCallbackContinuation = nil
+        translationCallbackTask?.cancel()
+        translationCallbackTask = nil
+        translator.cancelAll()
+        timingRecorder.clearAttempts()
+        finishingCaptions = false
+        let recoverySettings = TranscriptRecovery.Settings(targetLanguage: translator.targetLanguage,
+            glossary: translator.glossary, model: translator.model, useProxy: translator.useProxy)
+        asrSourceLedger = nil
+        timingRecorder.endSession()
         let finalChunks = chunks
         let finalMeetingLocaleIDs = meetingLanguageTimeline.localeIDs
         let summaryEligible = meetingSummaryGeneration == generation && !captionsToExtension
         let summaryRecordID = meetingSummaryRecordID
         let summaryStartedAt = sessionStartedAt
-        let summaryTargetLanguage = targetLang
+        let summaryTargetLanguage = recoverySettings.targetLanguage
         let summaryAliases = self.summaryAliases
         let summarySessionBegan = meetingSummarySessionBegan
         let summaryIngressTask = meetingSummaryIngressTask
@@ -1707,7 +2033,8 @@ final class CaptionState {
                 snapshot: finalChunks,
                 generation: generation,
                 meetingLocaleIDs: finalMeetingLocaleIDs,
-                meetingContextSnapshot: meetingContextSnapshot
+                meetingContextSnapshot: meetingContextSnapshot,
+                recoverySettings: recoverySettings
             )
         }
         finalTranscriptTask = transcriptTask
@@ -1773,6 +2100,11 @@ final class CaptionState {
 
     // ==== 字幕记录：会中增量写、停止时收尾 ====
     nonisolated static var transcriptDir: URL {
+        #if SHOOT || DEBUG
+        if let path = ProcessInfo.processInfo.environment["KIKISHIMA_RECORDS_DIR"] {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        #endif
         if let p = UserDefaults.standard.string(forKey: "transcriptDir"), !p.isEmpty { return URL(fileURLWithPath: p, isDirectory: true) }
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Kikishima", isDirectory: true)
     }
@@ -1793,7 +2125,7 @@ final class CaptionState {
     }
 
     /// final=false：节流 10 秒一次的中途保存（崩溃/强退不丢）；final=true：停止时必写
-    /// 少于 3 句、或不到 30 秒的会话不落盘：试一下、误触留下的碎片没人要
+    /// Autosaves keep the existing length gate; a final stop preserves even one sentence.
     private var worthSaving: Bool {
         guard let startedAt = sessionStartedAt else { return false }
         return worthSaving(chunks, startedAt: startedAt, now: Date())
@@ -1808,12 +2140,13 @@ final class CaptionState {
     private func ensureTranscriptURL(
         for snapshot: [CaptionChunk],
         startedAt: Date,
-        meetingContextSnapshot: MeetingContext?
+        meetingContextSnapshot: MeetingContext?,
+        targetLanguage: String? = nil
     ) -> URL {
         if let transcriptURL { return transcriptURL }
         let initialLocaleID = meetingLanguageTimeline.initialLocaleID
         let src = initialLocaleID.split(separator: "_").first.map(String.init) ?? initialLocaleID
-        let dst = targetCode(targetLang)
+        let dst = targetCode(targetLanguage ?? targetLang)
         let firstLine = snapshot.first(where: { !$0.isMarker && !$0.en.isEmpty })?.en ?? ""
         var fallbackTitle = String(firstLine.prefix(28)).replacingOccurrences(of: "[/:\\\\\n\r\t\"*?<>|]", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
         if firstLine.count > 28 { fallbackTitle += "…" }
@@ -1847,33 +2180,47 @@ final class CaptionState {
         snapshot: [CaptionChunk]? = nil,
         generation: Int,
         meetingLocaleIDs: [String]? = nil,
-        meetingContextSnapshot: MeetingContext?
+        meetingContextSnapshot: MeetingContext?,
+        recoverySettings: TranscriptRecovery.Settings? = nil
     ) async -> Result<URL?, Error> {
         if !final, generation != sessionGen { return .success(nil) }
         let snapshot = snapshot ?? chunks
-        guard !snapshot.isEmpty, let startedAt = sessionStartedAt,
-              worthSaving(snapshot, startedAt: startedAt, now: Date()) else { return .success(nil) }
+        guard snapshot.contains(where: { !$0.isMarker && $0.en.contains(where: { $0.isLetter || $0.isNumber }) }),
+              let startedAt = sessionStartedAt,
+              final || worthSaving(snapshot, startedAt: startedAt, now: Date()) else { return .success(nil) }
         if !final, let t = lastSaveAt, Date().timeIntervalSince(t) < 10 { return .success(nil) }
         lastSaveAt = Date()
         let url = ensureTranscriptURL(
             for: snapshot,
             startedAt: startedAt,
-            meetingContextSnapshot: meetingContextSnapshot
+            meetingContextSnapshot: meetingContextSnapshot,
+            targetLanguage: recoverySettings?.targetLanguage
         )
         let meetingLanguageValue = (meetingLocaleIDs ?? meetingLanguageTimeline.localeIDs).joined(separator: " → ")
         let meetingTitle = meetingContextSnapshot.map { MeetingContextTerms.recordTitle(from: $0.title) } ?? ""
         let meetingLine = meetingTitle.isEmpty ? "" : "- \(tr("会议")): \(meetingTitle)\n"
-        let header = "# \(tr("会议字幕记录"))\n\n- \(tr("开始")): \(Self.fileStamp.string(from: startedAt))\n\(meetingLine)- \(tr("会议语言")): \(meetingLanguageValue)\n- \(tr("译文语言")): \(targetLang)\n\n---\n\n"
+        let settings = recoverySettings ?? TranscriptRecovery.Settings(targetLanguage: translator.targetLanguage,
+            glossary: translator.glossary, model: translator.model, useProxy: translator.useProxy)
+        let header = "# \(tr("会议字幕记录"))\n\n- \(tr("开始")): \(Self.fileStamp.string(from: startedAt))\n\(meetingLine)- \(tr("会议语言")): \(meetingLanguageValue)\n- \(tr("译文语言")): \(settings.targetLanguage)\n\n---\n\n"
         let stamps = snapshot.map { chunk in
             let seconds = max(0, Int(chunk.createdAt.timeIntervalSince(startedAt)))
             return String(format: "%02d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
         }
-        var markdown = header
-        for (chunk, stamp) in zip(snapshot, stamps) where !chunk.en.isEmpty {
-            if chunk.isMarker { markdown += "---\n\n*\(chunk.en)*\n\n---\n\n"; continue }
-            markdown += "`\(stamp)` \(chunk.en)\n\n\(chunk.zh.hasPrefix("⚠") ? "" : chunk.displayTranslation)\n\n"
+        let rows = snapshot.indices.map { index in
+            let chunk = snapshot[index]
+            return TranscriptRecovery.Row(source: chunk.en,
+                translation: chunk.zh.hasPrefix("⚠") || chunk.isDraft ? "" : chunk.zh,
+                complete: chunk.translationComplete && !chunk.isDraft && !chunk.zh.hasPrefix("⚠")
+                    && !chunk.zh.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                marker: chunk.isMarker, stamp: stamps[index],
+                previousSource: chunk.previousSource ?? TranslationText.frozenPreviousSource(
+                    immediatePredecessorIsMarker: index > 0 && snapshot[index - 1].isMarker,
+                    lastNonMarker: snapshot[..<index].last(where: { !$0.isMarker })?.en))
         }
+        let record = TranscriptRecovery(header: header, incompleteLabel: tr("译文未完成，原文已保留"),
+            settings: settings, rows: rows)
         do {
+            let markdown = try record.markdown()
             try await transcriptWriter.write(markdown: markdown, to: url)
             transcriptDiskRevision += 1
             return .success(url)
@@ -1947,17 +2294,94 @@ final class CaptionState {
     }
 
     var hasPendingMeetingFinalization: Bool {
-        finalTranscriptTask != nil || meetingSummaryFinalizationTask != nil || meetingSummaryRetryTask != nil
+        stopTask != nil || finalTranscriptTask != nil || meetingSummaryFinalizationTask != nil || meetingSummaryRetryTask != nil || transcriptRetryTask != nil
     }
 
     func waitForPendingMeetingFinalization() async {
+        await stopTask?.value
         if let finalTranscriptTask { _ = await finalTranscriptTask.value }
         await meetingSummaryFinalizationTask?.value
         await meetingSummaryRetryTask?.value
+        await transcriptRetryTask?.value
+    }
+
+    @ObservationIgnored private var transcriptRetryTask: Task<Void, Never>?
+    @ObservationIgnored private var transcriptRetryTranslator: Translator?
+    private(set) var retryingTranscriptURL: URL?
+    private(set) var transcriptRetryMessage: String?
+    private(set) var transcriptRetryMessageURL: URL?
+
+    func transcriptIsBusy(_ url: URL) -> Bool {
+        retryingTranscriptURL == url || (transcriptURL == url &&
+            (running || starting || finishingCaptions || finalTranscriptTask != nil || meetingSummaryFinalizationTask != nil))
+    }
+
+    func canRetryTranscript(at url: URL) -> Bool {
+        retryingTranscriptURL == nil && !finishingCaptions && finalTranscriptTask == nil
+            && meetingSummaryFinalizationTask == nil && meetingSummaryRetryTask == nil
+            && !(transcriptURL == url && (running || starting))
+    }
+
+    func retryTranscript(at url: URL) {
+        guard canRetryTranscript(at: url) else { return }
+        let client = Translator()
+        client.proxyURL = proxyURL
+        client.sessionToken = sessionToken
+        transcriptRetryTranslator = client
+        retryingTranscriptURL = url
+        transcriptRetryMessageURL = url
+        transcriptRetryMessage = tr("正在补翻未完成字幕…")
+        transcriptRetryTask = Task { @MainActor in
+            defer {
+                client.cancelAll()
+                if Task.isCancelled { transcriptRetryMessage = tr("补翻已停止，已完成的译文已保存。") }
+                transcriptRetryTranslator = nil
+                retryingTranscriptURL = nil
+                transcriptRetryTask = nil
+                transcriptDiskRevision += 1
+            }
+            do {
+                let markdown = try await Task.detached(priority: .utility) {
+                    try String(contentsOf: url, encoding: .utf8)
+                }.value
+                guard !Task.isCancelled else { return }
+                guard let record = TranscriptRecovery.decode(markdown) else {
+                    transcriptRetryMessage = tr("记录已改变或不支持补翻，请打开原始记录。")
+                    return
+                }
+                guard !record.settings.useProxy || !client.sessionToken.isEmpty else {
+                    transcriptRetryMessage = tr("登录后才能补翻记录。")
+                    return
+                }
+                client.model = record.settings.model
+                client.glossary = record.settings.glossary
+                client.targetLanguage = record.settings.targetLanguage
+                client.useProxy = record.settings.useProxy
+                let deadline = ContinuousClock.now.advanced(by: .seconds(20))
+                try await TranscriptRecoveryRun.run(
+                    record: record, markdown: markdown, url: url, deadline: deadline,
+                    translate: { row, _, deadline in
+                        await CaptionDeadline.value(until: deadline) { done in
+                            client.translate(chunk: row.source, previous: row.previousSource, onDelta: { _ in }) { result in
+                                Task { @MainActor in done(result) }
+                            }
+                        }
+                    },
+                    replace: { expected, replacement, url in
+                        try await self.meetingSummaryStore.replaceTranscript(expected: expected, with: replacement, at: url)
+                    },
+                    didSave: { self.transcriptDiskRevision += 1 }
+                )
+                transcriptRetryMessage = tr("补翻已结束，已完成的译文已保存；未完成部分可再次重试。")
+            } catch {
+                transcriptRetryMessage = tr("记录已改变或无法保存，补翻已停止。")
+            }
+        }
     }
 
     func canRetryMeetingSummary(recordID: String?) -> Bool {
         guard let recordID,
+              retryingTranscriptURL == nil, !finishingCaptions,
               MeetingSummaryPreferences.shouldGenerate(consent: summaryConsent, enabled: meetingSummariesEnabled) else { return false }
         let recordBusy = busySummaryRecordIDs.contains(recordID)
             || meetingSummarySnapshot?.workingRecordIDs.contains(recordID) == true
@@ -2030,11 +2454,14 @@ final class CaptionState {
                                                 finished: !running && !starting && !drainingTranscription) else { return }
         guard !paused, !switchingMeetingLanguage else { return }   // 切换期间旧引擎尾巴与新模型下载提示都不进入会议正文
         switch event {
-        case .volatile(let t):
+        case .volatile(let t, let timing):
             volatileEn = t
-        case .finalized(let t):
+            observeASR(timing, committedPrefix: committedEn)
+        case .finalized(let t, let timing):
+            let prefix = committedEn
             committedEn += (committedEn.isEmpty ? "" : " ") + t.trimmingCharacters(in: .whitespaces)
             volatileEn = ""
+            observeASR(timing, committedPrefix: prefix)
             refreshPending()
             if !drainingTranscription { tickChunks() }   // 收尾只记录，不新发翻译
             trimCommitted()
@@ -2088,6 +2515,18 @@ final class CaptionState {
         refreshPending()
     }
 
+    private func observeASR(_ result: ASRResultTiming?, committedPrefix: String) {
+        guard timingRecorder.enabled else { return }
+        if asrSourceLedger == nil { asrSourceLedger = ASRSourceLedger() }
+        var source: ASRSourceID?
+        if let timing = result?.row, timing.sessionID == timingRecorder.sessionID,
+           let analyzer = timing.analyzerID, let revision = timing.asrRevisionID {
+            source = ASRSourceID(analyzerID: analyzer, revisionID: revision)
+            timingRecorder.recordASR(timing)
+        }
+        asrSourceLedger?.update(fullText, committedPrefix: committedPrefix, result: source)
+    }
+
     private func flushPendingTail(translate: Bool) {
         let chars = Array(fullText)
         let start = min(doneChars, chars.count)
@@ -2095,12 +2534,23 @@ final class CaptionState {
         guard tail.contains(where: { $0.isLetter || $0.isNumber }) else { return }
         let committedCount = Array(committedEn).count
         var cursor = start
+        var timingCursor = timingRecorder.enabled ? ASRSourceCursor(source: fullText, range: start..<chars.count) : nil
         for part in TranslationText.parts(tail) {
             var chunk = CaptionChunk(en: part)
             let partChars = Array(part).count
             cursor += partChars
             chunk.sourceFinal = TranslationText.tailPartIsSourceFinal(partEnd: cursor, committedCount: committedCount)
+            if timingRecorder.enabled {
+                chunk.timingMetadata = chunkTiming(text: part, reason: .forced, finalized: chunk.sourceFinal,
+                                                   sourceRange: timingCursor?.consume(part))
+                // Keep the existing pending timestamp untouched: acknowledgement
+                // suppression also reads it, independently of diagnostics.
+                chunk.timingMetadata?.row.pendingAgeMs = pendingClock.firstAt.map {
+                    TranslationTiming.milliseconds(chunk.timingCreatedAt - $0)
+                }
+            }
             chunks.append(chunk)
+            if let row = chunk.timingMetadata?.row { timingRecorder.event(.created, metadata: row) }
             if translate { requestTranslation(for: chunk.id, text: part) }
         }
         doneChars = chars.count
@@ -2119,6 +2569,7 @@ final class CaptionState {
         committedEn = String(chars[doneChars...]).trimmingCharacters(in: .whitespaces)
         doneChars = 0
         sourceLedger.trim(chars.count - committedEn.count, source: fullText)
+        asrSourceLedger?.trim(chars.count - committedEn.count, source: fullText)
     }
 
     private func refreshPending() {
@@ -2126,6 +2577,9 @@ final class CaptionState {
         if let rewind = revision.rewind {
             doneChars = rewind
             for id in revision.removed {
+                if let row = chunks.first(where: { $0.id == id })?.timingMetadata?.row {
+                    timingRecorder.event(.retracted, metadata: row)
+                }
                 translator.cancel(id)
                 if let attempt = activeTranslationAttempts.removeValue(forKey: id) {
                     inflight = max(0, inflight - 1); timingRecorder.discard(attempt)
@@ -2186,6 +2640,7 @@ final class CaptionState {
         let chunkText = String(chars[start..<min(cutoff, chars.count)]).trimmingCharacters(in: .whitespaces)
         guard !chunkText.isEmpty else { return }
         let observedPendingAt = pendingClock.firstAt
+        let timingStableAt = timingRecorder.enabled ? pendingClock.changedAt : nil
         pendingClock.consume(cutoff - doneChars)
         doneChars = cutoff
         refreshPending()
@@ -2197,8 +2652,20 @@ final class CaptionState {
         // 这句的灰色草稿跟着块走（块拿走了整段待翻文本时才对得上），GPT 定稿到了在原地变白，不闪不跳
         if instantDraft, !pendingDraft.isEmpty, cutoff >= chars.count - 1 { chunk.zh = pendingDraft; chunk.isDraft = true; pendingDraft = "" }
         chunk.sourceFinal = cutoff <= committedEn.count
+        if timingRecorder.enabled {
+            let reason = translationCutReason(source, doneChars: start, tuning: tuning,
+                age: observedPendingAt.map { now - $0 } ?? 0,
+                stableFor: timingStableAt.map { now - $0 } ?? 0, finalized: volatileEn.isEmpty)
+            var cursor = ASRSourceCursor(source: source, range: start..<cutoff)
+            chunk.timingMetadata = chunkTiming(text: chunkText, reason: reason, finalized: chunk.sourceFinal,
+                                               sourceRange: cursor.consume(chunkText))
+        }
         sourceLedger.register(chunk.id, range: start..<cutoff)
         chunks.append(chunk)
+        if let metadata = chunk.timingMetadata {
+            metadata.row.pendingAgeMs = observedPendingAt.map { TranslationTiming.milliseconds(now - $0) }
+            timingRecorder.event(.created, metadata: metadata.row)
+        }
         pushChunk(chunk, index: chunks.count - 1)
         scheduleTranscriptSave()
         // 翻译暂停（额度/登录）或限频退避中：只显示原文，不发请求；排进补翻队列，额度回来后补最近几块
@@ -2210,9 +2677,26 @@ final class CaptionState {
         requestTranslation(for: chunk.id, text: chunkText)
     }
 
+    private func chunkTiming(text: String, reason: TranslationCutReason?, finalized: Bool,
+                             sourceRange: Range<Int>?) -> TranslationTimingMetadata {
+        var row = TranslationTiming.sample(pending: nil, chunk: 0, request: 0, first: nil, end: 0, succeeded: true)
+        row.cutReason = reason?.rawValue; row.characterCount = text.count
+        row.utf16Count = text.utf16.count; row.sourceFinal = finalized; row.inflightAtCut = inflight
+        row.subrequestCount = TranslationText.parts(TranslationText.acknowledgement(text) ?? text).count
+        row.sessionID = timingRecorder.sessionID; row.chunkID = timingRecorder.nextID()
+        row.shortFragment = isShortTranslationFragment(text)
+        if let asrSourceLedger {
+            asrSourceLedger.attach(to: &row, range: sourceRange)
+        } else {
+            row.asrSourceRangeExact = false
+        }
+        return TranslationTimingMetadata(row)
+    }
+
     private func requestTranslation(for id: UUID, text: String) {
         guard let index = chunks.firstIndex(where: { $0.id == id }), !chunks[index].translationComplete,
               activeTranslationAttempts[id] == nil else { return }
+        chunks[index].translationExhausted = false
         if chunks[index].previousSource == nil {
             let immediate = chunks[..<index].last
             chunks[index].previousSource = TranslationText.frozenPreviousSource(
@@ -2229,6 +2713,8 @@ final class CaptionState {
            }()) {
             chunks[index].zh = prior.zh
             chunks[index].translationComplete = true
+            translationSucceeded()
+            timingRecorder.event(.reused, metadata: chunks[index].timingMetadata?.row)
             scheduleTranscriptSave()
             return
         }
@@ -2248,6 +2734,7 @@ final class CaptionState {
                         chunks[idx].zh = local
                         chunks[idx].isDraft = false
                         chunks[idx].translationComplete = true
+                        translationSucceeded()
                         pushChunk(chunks[idx], index: idx)
                         updateRunningStatus()
                     }
@@ -2269,45 +2756,115 @@ final class CaptionState {
         chunks[sourceIndex].translationAttempts += 1
         let previous = chunks[sourceIndex].previousSource ?? ""
         let requestedAt = ProcessInfo.processInfo.systemUptime
-        translator.translate(id: id, chunk: text, previous: previous) { [weak self] live in
+        let timing: (@Sendable (TranslationNetworkTiming) -> Void)?
+        if timingRecorder.enabled {
+            // Manual retry resets the retry budget, never the diagnostic count.
+            let attemptNumber = (chunks[sourceIndex].timingMetadata?.row.attemptNumber ?? 0) + 1
+            chunks[sourceIndex].timingMetadata?.row.attemptNumber = attemptNumber
+            chunks[sourceIndex].timingMetadata?.row.requestID = timingRecorder.nextID()
+            let metadata = chunks[sourceIndex].timingMetadata?.row
+            if let metadata { timingRecorder.beginAttempt(attempt, metadata: metadata) }
+            timing = { network in
+                Task { @MainActor in
+                    var row = TranslationTiming.sample(pending: nil, chunk: 0, request: 0, first: nil, end: 0, succeeded: true)
+                    row.sampleKind = 2; row.attemptNumber = attemptNumber
+                    row.sessionID = metadata?.sessionID; row.chunkID = metadata?.chunkID
+                    row.requestID = metadata?.requestID
+                    row.subrequestIndex = network.subrequestIndex; row.subrequestCount = network.subrequestCount
+                    row.networkRetry = network.retry; row.connectionReused = network.connectionReused
+                    row.transactionCount = network.transactionCount; row.requestToHeadersMs = network.requestToHeadersMs
+                    row.headersToFirstMs = network.headersToFirstMs; row.headersToEndMs = network.headersToEndMs
+                    row.networkRequestToEndMs = network.requestToEndMs
+                    row.worker = network.worker
+                    TranslationTimingRecorder.shared.record(row)
+                }
+            }
+        } else { timing = nil }
+        let request = TranslationConnectivityRequest(chunk: id, attempt: attempt)
+        let callbackContinuation = translationCallbackContinuation
+        TranslationConnectivityRequest.context.withValue(request) {
+        translator.translate(id: id, chunk: text, previous: previous, timing: timing) { [weak self] live in
             Task { @MainActor in
                 guard let self, gen == self.sessionGen, self.activeTranslationAttempts[id] == attempt, let idx = self.chunks.firstIndex(where: { $0.id == id }) else { return }
-                if !live.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    self.timingRecorder.first(attempt, at: ProcessInfo.processInfo.systemUptime)
+                if !self.chunks[idx].isDraft, !self.chunks[idx].translationComplete {
+                    self.chunks[idx].zh = live
+                    if !live.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        self.timingRecorder.first(attempt, at: ProcessInfo.processInfo.systemUptime)
+                    }
                 }
-                if !self.chunks[idx].isDraft, !self.chunks[idx].translationComplete { self.chunks[idx].zh = live }
             }
         } onDone: { [weak self] final in
-            Task { @MainActor in
+            callbackContinuation?.yield(.completion(request) { [weak self] in
+                await Task { @MainActor in
                 guard let self, gen == self.sessionGen, self.activeTranslationAttempts[id] == attempt else { return }
                 self.activeTranslationAttempts.removeValue(forKey: id)
                 self.inflight = max(0, self.inflight - 1)
                 guard let idx = self.chunks.firstIndex(where: { $0.id == id }) else { return }
-                self.timingRecorder.finish(attempt, pending: self.chunks[idx].timingPendingAt,
-                    chunk: self.chunks[idx].timingCreatedAt, request: requestedAt,
-                    end: ProcessInfo.processInfo.systemUptime, succeeded: final != nil)
                 if let final {
                     self.chunks[idx].zh = final
+                    if !final.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        self.timingRecorder.first(attempt, at: ProcessInfo.processInfo.systemUptime)
+                    }
+                }
+                self.timingRecorder.finish(attempt, pending: self.chunks[idx].timingPendingAt,
+                    chunk: self.chunks[idx].timingCreatedAt, request: requestedAt,
+                    end: ProcessInfo.processInfo.systemUptime, succeeded: final != nil,
+                    metadata: self.chunks[idx].timingMetadata?.row)
+                if final != nil {
                     self.chunks[idx].isDraft = false
                     self.chunks[idx].translationComplete = true
+                    self.translationSucceeded()
                     self.pushChunk(self.chunks[idx], index: idx)
                     self.lastFinalMs = Int(Date().timeIntervalSince(self.chunks[idx].createdAt) * 1000)
                     self.updateRunningStatus()
                     self.queueTranslatedChunksForMeetingSummary()
-                    if self.errorBanner?.severity == .info, !self.chunks.contains(where: { !$0.isMarker && !$0.translationComplete }) { self.errorBanner = nil }   // 翻出来了 = 网络回来了
                     if !self.translationRetryQueue.isEmpty { self.retryFailedChunks() }   // 网络恢复：把失败的补翻
-                } else if self.running {
+                } else if self.running || self.finishingCaptions {
                     self.chunks[idx].translationComplete = false
                     self.chunks[idx].retryAfter = Date().addingTimeInterval(pow(2, Double(self.chunks[idx].translationAttempts)))
+                    self.chunks[idx].translationExhausted = self.chunks[idx].translationAttempts == 3
+                    if self.chunks[idx].translationExhausted {
+                        self.chunks[idx].zh = ""
+                        self.chunks[idx].isDraft = false
+                        self.scheduleTranscriptSave()
+                    }
                     self.translationRetryQueue.enqueue(id)
                 }
+                }.value
+            })
+        }
+        }
+    }
+
+    private func consumeTranslationCallbacks(_ events: AsyncStream<TranslationCallbackEvent>, generation: Int) async {
+        var buffers: [UUID: TranslationConnectivityStatusBuffer] = [:]
+        for await event in events {
+            guard !Task.isCancelled, sessionGen == generation else { return }
+            let request = event.request
+            guard activeTranslationAttempts[request.chunk] == request.attempt else {
+                buffers[request.attempt] = nil
+                continue
+            }
+            switch event {
+            case .status(_, let text):
+                let message = buffers[request.attempt, default: .init()].receiveStatus(text)
+                if let message, (running || starting), !switchingMeetingLanguage { status = message }
+            case .failure(_, let failure):
+                let transient: Bool
+                switch failure { case .network, .server, .cancelled: transient = true; default: transient = false }
+                let message = buffers[request.attempt, default: .init()].classifyStatus(transient: transient)
+                if let message, (running || starting), !switchingMeetingLanguage { status = message }
+                handleFailure(failure, chunk: request.chunk)
+            case .completion(_, let finish):
+                await finish()
+                buffers[request.attempt] = nil
             }
         }
     }
 
     /// 翻译失败分类处理：额度/订阅/会话 → 停翻 + 横幅；限频 → 退避；网络 → 等重试
-    private func handleFailure(_ f: TranslateFailure) {
-        guard running || starting else { return }
+    private func handleFailure(_ f: TranslateFailure, chunk: UUID? = nil) {
+        guard running || starting || finishingCaptions else { return }
         switch f {
         case .unauthorized:
             sessionExpired()
@@ -2327,16 +2884,17 @@ final class CaptionState {
             status = tr("免费额度今日用尽 · 仅转写")
         case .rateLimited:
             rateLimitedUntil = Date().addingTimeInterval(4)
+            updateTranslationConnectivity()
             status = tr(PlanQuotaPolicy.rateLimitMessageKey)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4.2) { [weak self] in self?.retryFailedChunks() }
-        case .network(let msg):
-            status = msg
-            if errorBanner == nil { errorBanner = CaptionBanner(text: msg, severity: .info, action: .retry) }
-        case .server(let code):
-            status = tr("翻译服务错误 %@，稍后自动重试", code)
-            if errorBanner == nil {
-                errorBanner = CaptionBanner(text: status, severity: .info, action: .retry)
+            let gen = sessionGen
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.2) { [weak self] in
+                guard let self, self.sessionGen == gen else { return }
+                self.retryFailedChunks()
             }
+        case .network:
+            translationFailed(chunk: chunk)
+        case .server:
+            translationFailed(chunk: chunk)
         case .cancelled:
             break
         }
@@ -2344,7 +2902,7 @@ final class CaptionState {
 
     /// 补翻时优先最近可重试的块；跳过退避/耗尽项，不阻塞更旧的块。
     private func retryFailedChunks() {
-        guard running, !translationPaused else { return }
+        guard running || finishingCaptions, !translationPaused else { return }
         if let until = rateLimitedUntil, until > Date() { return }
         var ids = Array(translationRetryQueue.takeRecent(limit: chunks.count).reversed())
         while inflight < 3, !ids.isEmpty {
@@ -2352,9 +2910,6 @@ final class CaptionState {
             guard let idx = chunks.firstIndex(where: { $0.id == id }), !chunks[idx].translationComplete else { continue }
             guard activeTranslationAttempts[id] == nil else { continue }
             guard chunks[idx].translationAttempts < 3 else {
-                if errorBanner == nil {
-                    errorBanner = CaptionBanner(text: tr("部分字幕未翻译完成，可重试"), severity: .info, action: .retry)
-                }
                 continue
             }
             guard chunks[idx].retryAfter <= Date() else {
@@ -2461,3 +3016,63 @@ final class CaptionState {
         }
     }
 }
+
+
+#if SHOOT
+import AVFoundation
+
+/// Isolated hardware probe: no CaptionState, transcription engine or Translator.
+@MainActor
+enum ShootAudioOnly {
+    nonisolated static var requested: Bool {
+        ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_AUDIO_ONLY"] == "1"
+    }
+    private static var capture: SystemAudioTap?
+    private static let meter = AudioMeter()
+    static func start() {
+        guard capture == nil else { return }
+        let tap = SystemAudioTap(), meter = meter
+        var format: AVAudioFormat?
+        do {
+            try tap.start { _, input, _, _, _ in
+                if format == nil, var description = tap.streamDescription {
+                    format = AVAudioFormat(streamDescription: &description)
+                }
+                guard let format else { return }
+                meter.ingest(input, format: format)
+            }
+            capture = tap
+        } catch {
+            FileHandle.standardError.write(Data("Audio-only capture failed: \(error.localizedDescription)\n".utf8))
+        }
+    }
+    static func stop() { capture?.stop(); capture = nil }
+}
+#endif
+
+#if DEBUG || SHOOT
+/// Opt-in numerical diagnostics only; release contains neither code nor trigger.
+private enum CaptionLevelLog {
+    private static let path = ProcessInfo.processInfo.environment["KIKISHIMA_LEVEL_LOG"]
+    private static let writer = DispatchQueue(label: "com.kikishima.level-log")
+    static func append(level: Double) {
+        guard let path, !path.isEmpty else { return }
+        let timestamp = Date()
+        writer.async {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let line = "\(formatter.string(from: timestamp)) level=\(level) voiceDetected=\(level > 0.02)\n"
+            let url = URL(fileURLWithPath: path)
+            if !FileManager.default.fileExists(atPath: path) {
+                guard FileManager.default.createFile(atPath: path, contents: nil) else { return }
+            }
+            guard let handle = try? FileHandle(forWritingTo: url) else { return }
+            defer { try? handle.close() }
+            do {
+                try handle.seekToEnd()
+                try handle.write(contentsOf: Data(line.utf8))
+            } catch { /* Diagnostics must never interrupt audio or translation. */ }
+        }
+    }
+}
+#endif

@@ -80,6 +80,7 @@ harness += '''final class CaptionPanelController {
     var placing = false
     var revealed = false
     var lastSourceFrame: CGRect? = nil
+    func refreshVisibility() {} // Observation is outside this routing-only fixture.
     func build() { panel = FakePanel() }
     func show() {
         if notchEngine { IslandNotchController.shared.visible = true }

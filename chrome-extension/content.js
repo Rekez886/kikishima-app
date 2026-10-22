@@ -75,6 +75,21 @@
   }
   let opt = { ...DEFAULTS };
   let app = { signedIn: false, ui: 'en', target: 'Simplified Chinese' };
+  let setupGeneration = 0;
+  const activeRequests = new Map();
+  function cancelPending(predicate = () => true) {
+    const jobs = [...activeRequests.values()].filter(predicate);
+    const ids = jobs.map(job => job.requestId);
+    for (const job of jobs) {
+      clearTimeout(job.retryTimer);
+      if (state === job.owner) for (let i = 0; i < job.lines.length; i++) {
+        if (!state.tr[job.from + i]) state.done.delete(job.from + i);
+      }
+    }
+    for (const id of ids) activeRequests.delete(id);
+    if (cacheTimer) { clearTimeout(cacheTimer); cacheTimer = null; }
+    if (ids.length) send({ type: 'cancelTranslations', requestIds: ids });
+  }
   let state = null;       // { key, blocks, tr, requested, tracks, lang, live, stopLive }
   let bar = null, elTr = null, elSrc = null, elNote = null, panel = null, btn = null;
   let wordSpans = [], wordTimes = [], wordBlockIdx = -1;
@@ -103,12 +118,13 @@
   function cacheKey() { return state ? KikiReliability.cacheKey(site.name, state.key, state.trackKey, target()) : ''; }
   function loadCache() {
     return new Promise((resolve) => {
+      const owner = state, language = target();
       const k = cacheKey();
       if (!k) return resolve();
       try {
         chrome.storage.local.get([k], (v) => {
           const hit = v && v[k];
-          if (hit && Array.isArray(hit.tr) && hit.n === state.blocks.length) {
+          if (state === owner && language === target() && hit && Array.isArray(hit.tr) && hit.n === state.blocks.length) {
             hit.tr.forEach((tx, i) => { if (tx) state.tr[i] = tx; });
           }
           resolve();
@@ -120,7 +136,9 @@
   function saveCache() {
     if (!state) return;
     if (cacheTimer) clearTimeout(cacheTimer);
+    const owner = state, language = target();
     cacheTimer = setTimeout(() => {
+      if (state !== owner || language !== target()) return;
       const k = cacheKey(); if (!k) return;
       try {
         chrome.storage.local.set({ [k]: { n: state.blocks.length, tr: state.tr, at: 1 } });
@@ -384,7 +402,7 @@
     for (const v of ['both', 'translation', 'source']) {
       const o = document.createElement('option'); o.value = v; o.textContent = t()[v]; if (opt.display === v) o.selected = true; disp.appendChild(o);
     }
-    disp.addEventListener('change', () => { opt.display = disp.value; saveOpt(); render(lastIdx); ensureTranslated(Math.max(0, lastIdx)); });
+    disp.addEventListener('change', () => { opt.display = disp.value; if (opt.display === 'source') cancelPending(); saveOpt(); render(lastIdx); ensureTranslated(Math.max(0, lastIdx)); });
     p.appendChild(row(t().display, disp));
 
     const tgt = document.createElement('select');
@@ -393,6 +411,7 @@
       if (target() === l.code) o.selected = true; tgt.appendChild(o);
     }
     tgt.addEventListener('change', () => {
+      cancelPending();
       opt.target = tgt.value; saveOpt();
       if (state) { state.tr = new Array(state.blocks.length); state.done.clear(); state.firstDone = false; loadCache().then(() => { render(lastIdx); ensureTranslated(Math.max(0, lastIdx)); }); }
     });
@@ -545,35 +564,47 @@
 
   // ---- 翻译 ----
   /// 把区间 [from, to) 送去翻译；服务器是流式的，每行到达就画（不等整批）
-  async function translateRange(from, to) {
-    if (!state) return;
-    const key = state.key;
-    const lines = state.blocks.slice(from, to).map((b) => b.text);
-    if (!lines.length) return;
-    const resp = await send({ type: 'translate', videoId: key, lines, target: target(), from });
-    if (!state || state.key !== key) return;
-    if (resp && resp.error && !Array.isArray(resp.translations)) {
-      for (let i = from; i < to; i++) state.done.delete(i);
-      note(errorText(resp.error));
-      setTimeout(() => { if (state && state.key === key) ensureTranslated(lastIdx); }, 20000);
-      return;
-    }
-    (resp && resp.translations ? resp.translations : []).forEach((tx, i) => { if (tx) state.tr[from + i] = tx; });
+  function ownsRequest(job) {
+    return state === job.owner && target() === job.target && opt.enabled && opt.display !== 'source' &&
+      activeRequests.get(job.requestId) === job;
+  }
+  function acceptLine(job, i, text) {
+    if (!ownsRequest(job) || !Number.isInteger(i) || i < 0 || i >= job.lines.length || typeof text !== 'string' || !text.trim()) return;
+    const at = job.from + i;
+    if (state.blocks[at]?.text !== job.lines[i]) return;
+    state.tr[at] = text;
+    if (at === lastIdx) render(lastIdx);
+  }
+  async function translateRange(from, to, attempt = 0, end = performance.now() + 60000) {
+    if (!state || !opt.enabled || opt.display === 'source') return;
+    const lines = state.blocks.slice(from, to).map(b => b.text);
+    if (!lines.length || performance.now() >= end) return;
+    const job = { requestId: crypto.randomUUID(), owner: state, target: target(), lines, from, retryTimer: null };
+    activeRequests.set(job.requestId, job);
+    const resp = await send({ type: 'translate', requestId: job.requestId, videoId: state.key, trackKey: state.trackKey,
+      lines, target: job.target, from, timeoutMs: Math.max(0, Math.floor(end - performance.now())) });
+    if (!ownsRequest(job)) return;
+    const matches = resp && resp.requestId === job.requestId && resp.videoId === state.key &&
+      resp.trackKey === state.trackKey && resp.target === job.target;
+    if (matches) (resp.translations || []).forEach((tx, i) => acceptLine(job, i, tx));
     saveCache();
-    if (lastIdx >= from && lastIdx < to) render(lastIdx);
     const completed = new Set();
-    for (let i = from; i < to; i++) if (state.tr[i]) completed.add(i);
+    for (let i = from; i < to; i++) if (state.tr[i] || state.blocks[i]?.text !== lines[i - from]) completed.add(i);
     const gaps = KikiReliability.missingRanges(from, to, completed);
-    if (!(resp && resp.complete) || gaps.length) {
-      for (const [a, b] of gaps) for (let i = a; i < b; i++) state.done.delete(i);
-      note(t().netError);
-      setTimeout(() => {
-        if (!state || state.key !== key) return;
-        for (const [a, b] of gaps) translateRange(a, b);
-      }, 2000);
-      return;
-    }
-    note('');
+    if (gaps.length) {
+      note(resp?.error ? errorText(resp.error) : t().netError);
+      // One automatic missing-line retry, using the original budget. Keep done
+      // reservations so playback ticks cannot create an unbounded retry loop.
+      if (attempt === 0 && performance.now() + 2000 < end) {
+        job.retryTimer = setTimeout(() => {
+          if (!ownsRequest(job)) return;
+          activeRequests.delete(job.requestId);
+          for (const [a, b] of gaps) translateRange(a, b, 1, end);
+        }, 2000);
+        return;
+      }
+    } else note('');
+    activeRequests.delete(job.requestId);
   }
   /// 保证播放头附近已经翻好：头一块小（快出字），之后成块并行往前铺
   function ensureTranslated(idx) {
@@ -592,23 +623,21 @@
     }
     for (const [a, b] of want) {
       if (a >= b) continue;
-      let need = false;
-      for (let i = a; i < b; i++) if (!state.tr[i] && !state.done.has(i)) { need = true; break; }
-      if (!need) continue;
-      for (let i = a; i < b; i++) state.done.add(i);
-      translateRange(a, b);   // 不 await：两块并行
+      const reserved = new Set();
+      for (let i = a; i < b; i++) if (state.tr[i] || state.done.has(i)) reserved.add(i);
+      for (const [from, to] of KikiReliability.missingRanges(a, b, reserved)) {
+        for (let i = from; i < to; i++) state.done.add(i);
+        translateRange(from, to);   // Only newly missing rows; never overlap an active batch.
+      }
     }
   }
   // 服务器逐行流回来：收一条画一条
   try {
     chrome.runtime.onMessage.addListener((msg) => {
       if (!msg || msg.type !== 'batchLine' || !state) return;
-      const from = typeof msg.from === 'number' ? msg.from : 0;
-      const at = from + msg.i;
-      if (!state.tr[at]) {
-        state.tr[at] = msg.t;
-        if (at === lastIdx) render(lastIdx);
-      }
+      const job = activeRequests.get(msg.requestId);
+      if (!job || msg.videoId !== job.owner.key || msg.trackKey !== job.owner.trackKey || msg.target !== job.target || msg.from !== job.from) return;
+      acceptLine(job, msg.i, msg.t);
     });
   } catch (e) { /* 非扩展环境 */ }
 
@@ -628,13 +657,20 @@
     else highlightWords();
     if (idx >= 0) ensureTranslated(idx);
   }
+  function onSeek() {
+    const video = site.videoElement();
+    const at = state && video ? Math.max(0, findIdx(video.currentTime)) : 0;
+    const start = Math.floor(at / BATCH) * BATCH;
+    cancelPending(job => job.from + job.lines.length <= start || job.from >= start + BATCH * 2);
+    onTime();
+  }
   function bindVideo() {
     const v = site.videoElement();
     if (!v || timeBound === v) return;
-    if (timeBound) { timeBound.removeEventListener('timeupdate', onTime); timeBound.removeEventListener('seeking', onTime); }
+    if (timeBound) { timeBound.removeEventListener('timeupdate', onTime); timeBound.removeEventListener('seeking', onSeek); }
     timeBound = v;
     v.addEventListener('timeupdate', onTime);
-    v.addEventListener('seeking', onTime);
+    v.addEventListener('seeking', onSeek);
   }
 
   // ---- 入口 ----
@@ -644,12 +680,16 @@
     if (key === currentVideo) { ensureButton(); return; }
     teardown();
     currentVideo = key;
-    opt = await loadOpt();
+    const generation = setupGeneration;
+    const options = await loadOpt();
+    if (generation !== setupGeneration) return;
+    opt = options;
     ensureButton();
     ensureBar();
     note(t().loading);
 
     const hello = await send({ type: 'hello' });
+    if (generation !== setupGeneration) return;
     if (hello && !hello.error) {
       app = { signedIn: !!hello.signedIn, ui: KikiReliability.uiLanguage(hello.ui), plan: hello.plan || '' };
       if (typeof hello.enabled === 'boolean') opt.enabled = hello.enabled;   // 总开关在弹窗里，以它为准
@@ -657,7 +697,7 @@
 
     let got;
     try { got = await site.getCues(opt.sourceLang); } catch (e) { got = { cues: [], reason: 'fetch_failed' }; }
-    if (currentVideo !== key) return;
+    if (generation !== setupGeneration || currentVideo !== key) return;
 
     if (got.cues && got.cues.length) {
       const blocks = groupCues(got.cues);
@@ -666,6 +706,7 @@
       const trackKey = KikiReliability.trackIdentity(selectedTrack, blocks);
       state = { key, trackKey, blocks, tr: new Array(blocks.length), done: new Set(), firstDone: false, tracks, lang: got.lang, live: false };
       await loadCache();   // 这个视频翻过就直接用，重看/回放瞬间出字
+      if (generation !== setupGeneration) return;
       state.audioLang = got.audioLang || got.lang || '';
       state.title = got.title || '';
       note(opt.enabled && !app.signedIn ? t().signIn : '', true);
@@ -684,9 +725,11 @@
       note('');
       send({ type: 'active', on: opt.enabled, videoId: key, title: got.title || '', lang: got.lang || '', site: site.name });
       state.stopLive = site.startLive((cue) => {
-        if (!state || state.key !== key) return;
+        if (generation !== setupGeneration || !state || state.key !== key) return;
         const last = state.blocks[state.blocks.length - 1];
         if (last && cue.text.startsWith(last.text)) {
+          const index = state.blocks.length - 1;
+          cancelPending(job => job.from <= index && index < job.from + job.lines.length);
           last.text = cue.text;
           last.end = cue.end;
           const at = state.blocks.length - 1;
@@ -712,11 +755,13 @@
 
   // （实时听译已归 Mac app 自己管，扩展不再遥控它）
   function teardown() {
+    setupGeneration++;
+    cancelPending();
     if (currentVideo) send({ type: 'active', on: false, videoId: currentVideo });
     if (state && state.stopLive) state.stopLive();
     currentVideo = null; state = null; removeBar();
     if (panel) { panel.remove(); panel = null; }
-    if (timeBound) { timeBound.removeEventListener('timeupdate', onTime); timeBound.removeEventListener('seeking', onTime); timeBound = null; }
+    if (timeBound) { timeBound.removeEventListener('timeupdate', onTime); timeBound.removeEventListener('seeking', onSeek); timeBound = null; }
   }
 
   // 扩展被重新加载后，旧标签页里的这份脚本就成了孤儿：所有 chrome.* 抛 "Extension context invalidated"

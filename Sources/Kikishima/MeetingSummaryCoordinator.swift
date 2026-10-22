@@ -506,7 +506,8 @@ actor MeetingSummaryCoordinator {
                 aliases: aliases,
                 final: final && candidate.count == pending.count,
                 schemaVersion: Self.schemaVersion,
-                promptVersion: Self.promptVersion
+                promptVersion: Self.promptVersion,
+                costSessionID: UUID(uuidString: document.recordID)?.uuidString.lowercased()
             )
             guard (try? encoder.encode(candidateRequest).count).map({ $0 <= Self.maximumRequestBytes }) == true else { break }
             selected = candidate
@@ -521,7 +522,8 @@ actor MeetingSummaryCoordinator {
             aliases: aliases,
             final: final && selected.count == pending.count,
             schemaVersion: Self.schemaVersion,
-            promptVersion: Self.promptVersion
+            promptVersion: Self.promptVersion,
+            costSessionID: UUID(uuidString: document.recordID)?.uuidString.lowercased()
         )
     }
 
@@ -577,6 +579,7 @@ actor MeetingSummaryCoordinator {
         work.document.status = .finalizing
         work.failedDuringFinalization = false
         detachedByGeneration[generation] = work
+        emit()
 
         if let task = work.inFlight { await task.value }
 
@@ -640,8 +643,15 @@ actor MeetingSummaryCoordinator {
         }.isEmpty
         updated.status = updated.isFinal ? .finished : .finalizing
         try? await persist(updated, beside: work.transcriptURL)
+        // finalizeDetached can append the stopped meeting's tail while saving.
+        // Resume from its current queue instead of restoring the pre-save copy.
+        guard let current = detachedByGeneration[generation],
+              current.inFlightRequestID == request.requestID else { return }
+        work = current
         let sentIDs = Set(request.segments.map(\.id))
         work.pending.removeAll { sentIDs.contains($0.id) }
+        updated.isFinal = request.final && work.pending.isEmpty
+        updated.status = updated.isFinal ? .finished : .finalizing
         work.retryRequest = nil
         work.document = updated
         work.inFlight = nil

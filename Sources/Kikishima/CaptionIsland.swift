@@ -13,8 +13,8 @@ enum CaptionCollapseLevel: String, CaseIterable {
 }
 
 enum CaptionAppearance {
-    static func wantsExpanded(hasContent: Bool, dormant: Bool, settingsOpen: Bool, paused: Bool, hasBanner: Bool) -> Bool {
-        settingsOpen || (hasContent && (!dormant || paused || hasBanner))
+    static func wantsExpanded(hasContent: Bool, dormant: Bool, paused: Bool, hasBanner: Bool) -> Bool {
+        hasContent && (!dormant || paused || hasBanner)
     }
 
     static let fontLevelKey = "captionFontLevel"
@@ -122,12 +122,70 @@ enum CaptionIslandLayout {
     /// Final black shape width, including the host's 15pt side insets.
     static func compactWidth(notchWidth: CGFloat) -> CGFloat { max(0, notchWidth) + 240 }
 
-    static func expandedWidth(screenWidth: CGFloat) -> CGFloat {
-        min(max(1, screenWidth - 16), screenWidth < 1440 ? max(420, screenWidth * 0.4) : 560)
+    /// Final black capsule width, including the host's 30pt horizontal padding.
+    /// Approved build-spec §3.1: expanded widths do not depend on notch width.
+    static func expandedWidth(screenWidth: CGFloat, widthLevel: CaptionSizeLevel = .medium) -> CGFloat {
+        let available = screenWidth - 24
+        let minimum: CGFloat = 31 // 1pt content + the host's fixed 30pt padding
+        let large = min(800, max(minimum + 2, floor(available)))
+        // Below 111pt, two 40pt gaps plus host padding and positive content
+        // cannot fit. Reduce the gap to the largest fitting integer (>= 1pt).
+        // Below 33pt, three renderable integer tiers cannot fit at all: use
+        // 31/32/33pt, accepting overflow instead of zero content or equal tiers.
+        let gap = min(40, floor((large - minimum) / 2))
+        let proposedSmall = available >= 800 ? 420 : floor(min(420, available * 0.5))
+        let proposedMedium = available >= 800 ? 560 : floor(min(560, available * 0.7))
+        // Compress narrow first; only move medium when the upper gap or the
+        // positive narrow tier cannot otherwise be preserved.
+        let small = max(minimum, min(proposedSmall, proposedMedium - gap, large - 2 * gap))
+        let medium = min(large - gap, max(proposedMedium, small + gap))
+        switch widthLevel {
+        case .small: return small
+        case .medium: return medium
+        case .large: return large
+        }
     }
 
-    static func notchContentSize(visibleFrame: CGRect, widthFraction: CGFloat, height: CGFloat) -> CGSize {
-        CGSize(width: expandedWidth(screenWidth: visibleFrame.width) - 30, height: height)
+    /// Content-only caps; the host adds its existing vertical padding separately.
+    static func expandedContentHeight(visibleHeight: CGFloat, heightLevel: CaptionSizeLevel) -> CGFloat {
+        let cap = floor(visibleHeight * 33 / 100)
+        // Merge toward the lower tier. Hold merged tiers at 64 until a full
+        // 24pt gap fits; splitting can only increase a tier, never shrink it.
+        let large = cap < 88 ? 64 : min(CGFloat(240), cap)
+        let medium = large < 112 ? 64 : min(CGFloat(148), large - 24)
+        let small = max(64, min(CGFloat(100), medium - 24))
+        switch heightLevel {
+        case .small: return small
+        case .medium: return medium
+        case .large: return large
+        }
+    }
+
+    /// Text margins are measured from the final capsule, not its host content.
+    static func textColumnWidth(islandWidth: CGFloat) -> CGFloat {
+        max(1, islandWidth - 40)
+    }
+
+    static func islandContentHeight(measured: CGFloat, visibleHeight: CGFloat,
+                                    heightLevel: CaptionSizeLevel) -> CGFloat {
+        let cap = expandedContentHeight(visibleHeight: visibleHeight, heightLevel: heightLevel)
+        return min(cap, max(64, ceil(measured)))
+    }
+
+    static func notchContentSize(visibleFrame: CGRect, widthLevel: CaptionSizeLevel = .medium,
+                                 heightLevel: CaptionSizeLevel) -> CGSize {
+        CGSize(width: max(1, expandedWidth(screenWidth: visibleFrame.width, widthLevel: widthLevel) - 30),
+               height: expandedContentHeight(visibleHeight: visibleFrame.height, heightLevel: heightLevel))
+    }
+
+    /// Preserve the real-screen menu-bar height (frame.maxY - visibleFrame.maxY).
+    /// contentSize excludes the host's existing horizontal and bottom padding.
+    static func notchedWindowFrame(screenFrame: CGRect, notchHeight: CGFloat,
+                                   contentSize: CGSize) -> CGRect {
+        let size = CGSize(width: contentSize.width + 30,
+                          height: contentSize.height + notchHeight + 15)
+        return CGRect(x: screenFrame.midX - size.width / 2,
+                      y: screenFrame.maxY - size.height, width: size.width, height: size.height)
     }
 
     static let idleHeight: CGFloat = 36
@@ -166,11 +224,11 @@ enum CaptionIslandLayout {
     static func expandedRect(
         visibleFrame: CGRect,
         centerX: CGFloat,
-        widthFraction: CGFloat,
+        widthLevel: CaptionSizeLevel = .medium,
         compact: Bool
     ) -> CGRect {
         let height = compact ? expandedCompactHeight : expandedFullHeight
-        let width = max(480, min(visibleFrame.width - 24, visibleFrame.width * widthFraction))
+        let width = expandedWidth(screenWidth: visibleFrame.width, widthLevel: widthLevel)
         return pinned(width: width, height: height, centerX: centerX, visibleFrame: visibleFrame)
     }
 
@@ -194,15 +252,37 @@ enum CaptionHierarchy {
     static func opacity(age: Int) -> Double {
         [0.85, 0.65, 0.50][min(2, max(0, age - 1))]
     }
+    /// Height is the caption viewport, after title/status/pause chrome. The
+    /// slab keeps its existing 8pt top/bottom padding. No island setting is read.
+    static func desktopHistoryCount(availableHeight: Double, userSize: Double,
+                                    showTranslation: Bool, showSource: Bool, currentHeight: Double? = nil) -> Int {
+        let scale = userSize / 18
+        let current = (showTranslation ? 48.0 + (showSource ? 22 : 0) : 24.0) * scale
+        let history = 21 * scale + 4
+        return max(1, Int(max(0, availableHeight - 16 - (currentHeight ?? current)) / max(1, history)))
+    }
     /// Only current bilingual captions have a source line. Source-only history
     /// uses the primary 21pt line, just like translated history.
-    static func historyLimit(userSize: Double, showTranslation: Bool, showSource: Bool, banner: Bool) -> Int {
+    static func historyLimit(userSize: Double, showTranslation: Bool, showSource: Bool, banner: Bool, height: Double = 153) -> Int {
         let scale = userSize / 18
         let current = ((showTranslation ? 48.0 : 0) + (showSource ? 22.0 : 0)) * scale
         let history = historyLineHeight(showTranslation: showTranslation, showSource: showSource) * scale + 4
-        let available = 153 - 16 - current - (banner ? 40 : 0)
+        let available = height - 16 - current - (banner ? 40 : 0)
         return min(maximumHistory, max(0, Int(available / max(1, history))))
     }
+    /// The source-only display choice remains authoritative. Only translation-only
+    /// waiting rows use an ellipsis; every other missing translation uses source.
+    static func row(source: String, translation: String, waiting: Bool,
+                    current: Bool, showTranslation: Bool, showSource: Bool) -> CaptionRowText {
+        if !showTranslation { return CaptionRowText(primary: source, secondary: nil, placeholder: false) }
+        if translation.isEmpty {
+            let placeholder = waiting && !showSource
+            return CaptionRowText(primary: placeholder ? "…" : source, secondary: nil, placeholder: placeholder)
+        }
+        return CaptionRowText(primary: translation,
+            secondary: current && showSource && !source.isEmpty ? source : nil, placeholder: false)
+    }
+
     static func showsSource(current: Bool, showTranslation: Bool, showSource: Bool) -> Bool {
         showSource && (current || !showTranslation)
     }
@@ -211,5 +291,80 @@ enum CaptionHierarchy {
     }
     static func fontSize(current: Bool, userSize: Double) -> Double {
         (current ? currentSize : historySize) * userSize / 18
+    }
+}
+
+
+enum CaptionToolbarMode { case island, captionWindow }
+enum CaptionToolbarAction: Hashable { case pause, stop, compact, settings, review }
+
+enum CaptionToolbar {
+    static func buttons(mode: CaptionToolbarMode, running: Bool, paused: Bool) -> [CaptionToolbarAction] {
+        switch mode {
+        case .island:
+            return paused ? [.settings] : [.pause, .settings]
+        case .captionWindow:
+            return running ? [.pause, .stop, .compact, .settings, .review] : [.compact, .settings, .review]
+        }
+    }
+}
+
+/// Top-left coordinates relative to the caption viewport, including host side
+/// insets. The notched toolbar occupies negative y in the existing camera row.
+struct CaptionIslandToolbarLayout {
+    static let buttonSize: CGFloat = 20
+    static let stripHeight: CGFloat = 24
+    let columnWidth: CGFloat
+    let toolbar: CGRect
+    let contentTop: CGFloat
+    let statusText: CGRect
+    let resumeButton: CGRect
+    let currentText: CGRect
+
+    static func extraHeight(notchHeight: CGFloat) -> CGFloat {
+        notchHeight > 0 ? 0 : stripHeight
+    }
+
+    static func floatingWindowHeight(contentHeight: CGFloat, expanded: Bool) -> CGFloat {
+        contentHeight + (expanded ? stripHeight : 0) + 8 + 15
+    }
+
+    init(islandWidth: CGFloat, paused: Bool, hovering: Bool,
+         notchWidth: CGFloat = 0, notchHeight: CGFloat = 0,
+         statusRowHeight: CGFloat = 44, currentTextHeight: CGFloat = 100) {
+        columnWidth = CaptionIslandLayout.textColumnWidth(islandWidth: islandWidth)
+        let count = CaptionToolbar.buttons(mode: .island, running: true, paused: paused).count
+        let width = CGFloat(count) * Self.buttonSize + CGFloat(count - 1) * 6
+        contentTop = Self.extraHeight(notchHeight: notchHeight)
+        let rightAlignedX = islandWidth - 20 - width
+        let x = notchHeight > 0 ? max(rightAlignedX, (islandWidth + notchWidth) / 2 + 4) : rightAlignedX
+        toolbar = CGRect(x: x, y: notchHeight > 0 ? -(notchHeight + Self.buttonSize) / 2 : 0,
+                         width: width, height: Self.buttonSize)
+        let rowHeight = paused ? max(0, statusRowHeight) : 0
+        statusText = CGRect(x: 20, y: contentTop, width: columnWidth, height: rowHeight)
+        resumeButton = statusText
+        currentText = CGRect(x: 20, y: contentTop + rowHeight + (paused ? 4 : 0),
+                             width: columnWidth, height: max(0, currentTextHeight))
+    }
+}
+
+struct CaptionRowText: Equatable {
+    let primary: String
+    let secondary: String?
+    let placeholder: Bool
+    /// Only currently visible text belongs in the accessibility tree.
+    var accessibilityText: String { [primary, secondary].compactMap { $0 }.joined(separator: "\n") }
+}
+
+/// The outer island may remain at its 64pt floor while its status slot grows.
+/// Interpolate the internal boundary independently of native window resizing.
+struct IslandCaptionColumnGeometry {
+    let status: CGRect
+    let captions: CGRect
+    init(bounds: CGRect, statusHeight: CGFloat, fraction: CGFloat) {
+        let height = min(bounds.height, max(0, statusHeight) * min(1, max(0, fraction)))
+        status = CGRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: height)
+        captions = CGRect(x: bounds.minX, y: bounds.minY + height,
+                          width: bounds.width, height: max(0, bounds.height - height))
     }
 }

@@ -13,6 +13,7 @@ struct CaptionPreviewText {
             segment.translation.isEmpty ? (translationPaused ? segment.source : "…") : segment.translation
         }
         if !pendingTranslation.isEmpty { translated.append(pendingTranslation) }
+        else if translationPaused && !pendingSource.isEmpty { translated.append(pendingSource) }
         translation = translated.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 }

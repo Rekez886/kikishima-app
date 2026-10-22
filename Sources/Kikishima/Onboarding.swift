@@ -1,5 +1,5 @@
 // 首次启动引导：欢迎 → 语言 → 会议语言 → 权限 → 登录 → 开始
-// 只有走到「完成 / 现在就试」才标记 onboarded；中途关窗下次启动还会再来（帮助页也能手动重跑）
+// 只有本次真实识别和翻译成功后才可完成；关窗不标记完成。
 import SwiftUI
 import AppKit
 import Speech
@@ -9,6 +9,8 @@ import IOKit.hid
 final class OnboardingController: NSObject, NSWindowDelegate {
     static let shared = OnboardingController()
     private var window: NSWindow?
+    private var ownedTrialGeneration: Int?
+    private weak var ownedTrialAudio: OnboardingTrialAudio?
 
     static var needed: Bool { !UserDefaults.standard.bool(forKey: "onboarded") }
     static func markDone() { UserDefaults.standard.set(true, forKey: "onboarded") }
@@ -25,6 +27,7 @@ final class OnboardingController: NSObject, NSWindowDelegate {
             w.delegate = self
             w.center()
             w.contentView = NSHostingView(rootView: OnboardingView(state: CaptionState.shared, finish: { [weak self] enterMain in
+                self?.stopTrial()
                 Self.markDone()
                 self?.window?.orderOut(nil)
                 if enterMain { AppDelegate.enter() }   // 引导结束进主窗口；「现在就试」不进（主窗会挡在字幕前）
@@ -37,9 +40,28 @@ final class OnboardingController: NSObject, NSWindowDelegate {
 
     /// 帮助页「重新运行首次引导」：从第一页重来
     func restart() {
+        stopTrial()
         window?.orderOut(nil)
         window = nil
         show()
+    }
+
+    func ownTrial(_ generation: Int, audio: OnboardingTrialAudio) {
+        ownedTrialGeneration = generation
+        ownedTrialAudio = audio
+    }
+
+    func stopTrial() {
+        ownedTrialAudio?.stop()
+        ownedTrialAudio = nil
+        let state = CaptionState.shared
+        if ownedTrialGeneration == state.sessionGeneration, state.running || state.starting { state.stop() }
+        ownedTrialGeneration = nil
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        stopTrial()
+        window = nil
     }
 }
 
@@ -50,6 +72,10 @@ struct OnboardingView: View {
     @State private var email = ""
     @State private var code = ""
     @State private var showEmailSignIn = false
+    @State private var trialGeneration: Int?
+    @State private var verifiedChunk: CaptionChunk?
+    @State private var trialAudio = OnboardingTrialAudio()
+    @State private var trialAudioUnavailable = false
     private let total = 6
     private let signInPage = 4
 
@@ -81,14 +107,16 @@ struct OnboardingView: View {
                 Text("\(page + 1) / \(total)").font(.caption).foregroundStyle(KKColor.textTertiary)
                 Spacer()
                 if page < total - 1 {
-                    if page == signInPage && state.sessionToken.isEmpty {
-                        Button(tr("以后再说")) { page += 1 }.accessibilityIdentifier("kk-onboarding-skip").buttonStyle(.bordered)   // 跳过不能是全页最显眼的按钮
-                    } else {
-                        Button(tr("下一步")) { page += 1 }.accessibilityIdentifier("kk-onboarding-next").kkPrimaryButton()
-                    }
+                    Button(tr("下一步")) { page += 1 }.accessibilityIdentifier("kk-onboarding-next").kkPrimaryButton()
+                        .disabled(page == signInPage && state.sessionToken.isEmpty)
                 } else {
-                    Button(tr("完成")) { finish(true) }.accessibilityIdentifier("kk-onboarding-finish")
+                    Button(tr("完成")) {
+                        guard verifiedChunk != nil else { return }
+                        trialAudio.stop()
+                        finish(true)
+                    }.accessibilityIdentifier("kk-onboarding-finish")
                         .kkPrimaryButton()
+                        .disabled(verifiedChunk == nil)
                 }
             }
             .padding(.horizontal, 24).padding(.vertical, 14)
@@ -96,6 +124,15 @@ struct OnboardingView: View {
         }
         .buttonStyle(KKQuietButtonStyle())
         .kkNeutralControls()
+        .onChange(of: successfulTrialChunk?.id) {
+            if let chunk = successfulTrialChunk { verifiedChunk = chunk }
+        }
+        .onChange(of: state.running) {
+            if state.running, trialGeneration == state.sessionGeneration {
+                trialAudioUnavailable = !trialAudio.play(locale: state.localeID)
+            } else { trialAudio.stop() }
+        }
+        .onDisappear { trialAudio.stop() }
     }
 
     private var welcome: some View {
@@ -108,7 +145,7 @@ struct OnboardingView: View {
             if !state.sessionToken.isEmpty {
                 Label(tr("已登录：%@", state.accountEmail.isEmpty ? tr("账号") : state.accountEmail), systemImage: "checkmark.circle.fill")
                     .foregroundStyle(KKColor.textSecondary)
-                Text(state.plan == "pro" ? tr("Pro 档") : tr("免费版：每周 60 分钟翻译字幕，付费后同一邮箱自动升级 Pro。"))
+                Text(state.plan == "pro" ? tr("Pro 档") : tr("免费版：每周 60 分钟翻译字幕，购买后当前账号自动升级 Pro。"))
                     .font(.callout).foregroundStyle(KKColor.textSecondary)
             } else if state.codeSent {
                 Text(tr("验证码已发到 %@，10 分钟内有效。", state.accountEmail)).font(.callout).foregroundStyle(KKColor.textSecondary)
@@ -163,32 +200,67 @@ struct OnboardingView: View {
         .padding(30)
     }
 
-    private var readyPreviewSource: String {
-#if SHOOT || DEBUG
-        if ShootSimulation.requestedMode != nil { return ShootSimulation.previewSource }
-#endif
-        return "Let's review the next steps together."
+    private var successfulTrialChunk: CaptionChunk? {
+        state.chunks.first {
+            !$0.isMarker && OnboardingTrial.canComplete(
+                startedGeneration: trialGeneration, currentGeneration: state.sessionGeneration,
+                sourceFinal: $0.sourceFinal, translationComplete: $0.translationComplete,
+                source: $0.en, translation: $0.zh, isDraft: $0.isDraft)
+        }
+    }
+
+    private func startTrial() {
+        guard state.startCaptionSession(showPanel: false) else { return }
+        verifiedChunk = nil
+        trialGeneration = state.sessionGeneration
+        OnboardingController.shared.ownTrial(state.sessionGeneration, audio: trialAudio)
+        trialAudioUnavailable = false
     }
 
     private var ready: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(tr("可以开会了")).font(.title2.bold())
-            HomeCaptionPreview(source: readyPreviewSource,
-                translation: HomeCaptionPreview.sampleTranslation(for: state.targetLang), status: "",
-                compact: true, display: state.captionDisplay,
-                desktop: state.captionSurface == "window", isExample: true)
-            Text(.init(tr("开会时：菜单栏点图标 → 开始字幕，或者 **%@**。字幕窗会浮在会议窗口上面，全屏也能看到。", GlobalHotkey.displayText)))
-                .font(.callout)
-            Text(tr("会议是日语或其他语言？在「打开 Kikishima」里改会议语言。人名、产品名总被翻错？把它们加进术语表。"))
+            Text(tr("先看到第一句真实译文")).font(.title2.bold())
+            Text(tr("开始后会播放测试语音，用系统音频识别并在线翻译。看到原文和译文后才能完成引导。"))
                 .font(.callout).foregroundStyle(KKColor.textSecondary)
-            Button {
-                finish(false)
-                state.toggle()
-            } label: {
-                Label(tr("现在就试一下（开始字幕）"), systemImage: "play.fill")
+            if let chunk = verifiedChunk {
+                Label(tr("真实字幕测试成功"), systemImage: "checkmark.circle.fill")
+                Text(chunk.en).foregroundStyle(KKColor.textSecondary).textSelection(.enabled)
+                Text(chunk.zh).textSelection(.enabled)
+                Text(.init(tr("开会时：菜单栏点图标 → 开始字幕，或者 **%@**。字幕窗会浮在会议窗口上面，全屏也能看到。", GlobalHotkey.displayText)))
+                    .font(.caption).foregroundStyle(KKColor.textSecondary)
+            } else if trialGeneration != nil {
+                Text(state.status).font(.callout).accessibilityIdentifier("kk-onboarding-trial-status")
+                if !state.pendingEn.isEmpty { Text(state.pendingEn).foregroundStyle(KKColor.textSecondary) }
+                if let chunk = state.chunks.last(where: { !$0.isMarker }) {
+                    Text(chunk.en).foregroundStyle(KKColor.textSecondary)
+                    if !chunk.zh.isEmpty { Text(chunk.displayTranslation) }
+                }
+                if let banner = state.errorBanner {
+                    Text(banner.text).foregroundStyle(KKColor.warning)
+                    if let action = banner.action {
+                        Button(tr(action.title)) {
+                            if action == .retry, !state.running, !state.starting { startTrial() }
+                            else { state.performBanner(action) }
+                        }
+                    }
+                }
             }
-            .kkPrimaryButton()
-            .disabled(state.sessionToken.isEmpty)
+            if trialAudioUnavailable || state.silentTooLong {
+                Text(tr("未检测到测试语音。请播放当前会议语言的音频，检查输出设备和系统录音权限，再重试。"))
+                    .font(.callout).foregroundStyle(KKColor.warning)
+                Button(tr("检查权限")) { page = 3 }
+            }
+            HStack {
+                if state.running {
+                    Button(tr("重播测试语音")) { trialAudioUnavailable = !trialAudio.play(locale: state.localeID) }
+                        .disabled(state.paused || trialGeneration != state.sessionGeneration)
+                    Button(tr("停止字幕")) { trialAudio.stop(); state.stop() }
+                } else {
+                    Button(tr("开始并播放测试语音")) { startTrial() }
+                        .kkPrimaryButton()
+                        .disabled(state.sessionToken.isEmpty || state.starting)
+                }
+            }
             if state.sessionToken.isEmpty {
                 HStack(spacing: 8) {
                     Text(tr("还没登录，登录后才能开始翻译。")).font(.caption).foregroundStyle(KKColor.warning)
@@ -467,7 +539,7 @@ struct MeetingLanguagesPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(tr("开会时通常会听到哪些语言？")).font(.title2.bold())
-            Text(tr("可以多选。选好后会在后台下载对应的离线转写模型（每个几百 MB，只下一次）。")).font(.callout).foregroundStyle(KKColor.textSecondary)
+            Text(tr("可以多选。首次只下载默认会议语言，其他语言在使用时下载。")).font(.callout).foregroundStyle(KKColor.textSecondary)
             let commonShown = common.filter { c in all.isEmpty || all.contains { $0.identifier == c } }
             let shown = showAll ? all.map(\.identifier) : commonShown + state.meetingLocales.filter { !commonShown.contains($0) }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
@@ -475,8 +547,8 @@ struct MeetingLanguagesPage: View {
                     let on = state.meetingLocales.contains(id)
                     Button {
                         if on { state.meetingLocales.removeAll { $0 == id } }
-                        else { state.meetingLocales.append(id); state.predownloadModels([id]) }
-                        if let first = state.meetingLocales.first { state.localeID = first }
+                        else { state.meetingLocales.append(id) }
+                        if let first = state.meetingLocales.first { state.localeID = first; state.predownloadModels([first]) }
                     } label: {
                         HStack {
                             Image(systemName: on ? "checkmark.circle.fill" : "circle").foregroundStyle(on ? KKColor.textPrimary : KKColor.textSecondary)
@@ -517,7 +589,7 @@ struct MeetingLanguagesPage: View {
                 Toggle(tr("选了就下载模型（建议在 Wi-Fi 下）"), isOn: $state.autoDownloadModels).toggleStyle(KKSwitchToggleStyle()).controlSize(.small)
                     .accessibilityLabel(tr("选了就下载模型（建议在 Wi-Fi 下）"))
                     .accessibilityIdentifier("kk-onboarding-download-models")
-                Text(state.autoDownloadModels ? tr("已选 %@ 种，每种几百 MB，只下一次。", state.meetingLocales.count) : tr("稍后下载：开始字幕时再按需下载当前会议语言的模型。"))
+                Text(state.autoDownloadModels ? tr("首次只预下载默认会议语言的转写模型。") : tr("稍后下载：开始字幕时再按需下载当前会议语言的模型。"))
                     .font(.caption).foregroundStyle(KKColor.textSecondary)
             }
         }
@@ -533,7 +605,7 @@ struct MeetingLanguagesPage: View {
                 if let mine = UILang.all.first(where: { $0.code == state.uiLanguage }), mine.locale != "en_US" { picks.append(mine.locale) }
                 state.meetingLocales = picks.filter { c in all.contains { $0.identifier == c } }
                 if let f = state.meetingLocales.first { state.localeID = f }
-                state.predownloadModels(state.meetingLocales)
+                state.predownloadModels([state.localeID])
             }
         }
     }

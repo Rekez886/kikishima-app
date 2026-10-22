@@ -7,5 +7,6 @@ python3 tests/accent_scope/check_wiring.py
 test_dir="$KK_TEST_TMP_ROOT"
 swiftc -typecheck -module-cache-path "$test_dir/module-cache" \
     Sources/Kikishima/DesignTokens.swift Sources/Kikishima/BrandIcons.swift \
+    Sources/Kikishima/CaptionIsland.swift \
     Sources/Kikishima/HomeCaptionPreview.swift Sources/Kikishima/OnboardingComponents.swift \
     tests/accent_scope/Fixtures.swift

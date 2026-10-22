@@ -20,7 +20,7 @@ enum R11TestEnvironment {
 @MainActor
 enum CaptionListeningStatus {
     static func text(silentTooLong: Bool, audioStalled: Bool) -> String {
-        if audioStalled { return tr("音频输入停止了：检查输出设备是否被拔掉") }
+        if audioStalled { return tr("音频中断，正在恢复") }
         if silentTooLong { return tr("没听到声音") }
         return tr("正在听…")
     }
@@ -37,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static func apply() { NSApp.setActivationPolicy(showDockIcon ? .regular : .accessory) }
     /// 由 SwiftUI 侧注入（openWindow 只能在 View 环境里拿到）
     static var openMainWindow: (() -> Void)?
+    /// Injected by the owner of menuPresented; never simulate a status-item click.
+    static var presentMenuPanel: (() -> Void)?
+    static func openMenuPanel() { presentMenuPanel?() }
     static weak var menuStatusButton: NSStatusBarButton?
     static func restoreMenuStatusFocus() {
         guard let button = menuStatusButton, let window = button.window else { return }
@@ -79,6 +82,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 状态栏图标就位（openMainWindow 已注入）→ 启动即显示主窗口（不是静默常驻）；引导期间不弹，引导结束由它自己接管
     private static var launchShown = false
     static func hostReady() {
+#if SHOOT
+        if ShootAudioOnly.requested { return }
+#endif
 #if SHOOT || DEBUG
         if ShootSimulation.requestedMode != nil { return }
 #endif
@@ -87,6 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if showMainOnLaunch && !OnboardingController.needed { enter() }
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
+#if SHOOT
+        if ShootAudioOnly.requested { ShootAudioOnly.start(); return }
+#endif
 #if SHOOT || DEBUG
         ShootSimulation.applyRequestedAppearance()
 #endif
@@ -114,6 +123,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     /// 回到前台：刷一次档位（付款回来 / 别处改了订阅），30 秒节流
     func applicationDidBecomeActive(_ notification: Notification) {
+#if SHOOT
+        if ShootAudioOnly.requested { return }
+#endif
 #if SHOOT || DEBUG
         if ShootSimulation.requestedMode != nil { return }
 #endif
@@ -121,13 +133,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     /// 网页版 Google / Apple 登录回跳：kikishima://signed-in?code=…&state=…（或 ?error=…）
     func application(_ application: NSApplication, open urls: [URL]) {
+#if SHOOT
+        if ShootAudioOnly.requested { return }
+#endif
         for url in urls where url.scheme == "kikishima" {
-            CaptionState.shared.handleAuthCallback(url)
+            if url.host == "billing-return" {
+                CaptionState.shared.restorePurchases()
+            } else {
+                CaptionState.shared.handleAuthCallback(url)
+            }
             Self.enter()
         }
     }
     /// ⌘Q / Dock 退出 / 注销：先停字幕把记录写完
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+#if SHOOT
+        if ShootAudioOnly.requested { ShootAudioOnly.stop(); return .terminateNow }
+#endif
         let s = CaptionState.shared
 #if DEBUG
         FileHandle.standardError.write(Data("KKTermination received running=\(s.running) starting=\(s.starting) pending=\(s.hasPendingMeetingFinalization) waiting=\(waitingForTermination)\n".utf8))
@@ -137,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             waitingForTermination = true
             Task { @MainActor in
                 await s.waitForPendingMeetingFinalization()
+                TranslationTimingRecorder.shared.flushBeforeExit()
 #if DEBUG
                 FileHandle.standardError.write(Data("KKTermination finalization-finished\n".utf8))
 #endif
@@ -147,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 #if DEBUG
         FileHandle.standardError.write(Data("KKTermination terminateNow\n".utf8))
 #endif
+        TranslationTimingRecorder.shared.flushBeforeExit()
         return .terminateNow
     }
     /// 点 Dock 图标且没有可见窗口 → 进主窗口
@@ -163,6 +187,9 @@ struct KikishimaApp: App {   // 入口在 main.swift（要先判断是不是 Chr
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
+#if SHOOT
+        if ShootAudioOnly.requested { return }
+#endif
 #if SHOOT || DEBUG
         if ShootSimulation.requestedMode != nil { return }
 #endif
@@ -179,32 +206,69 @@ struct KikishimaApp: App {   // 入口在 main.swift（要先判断是不是 Chr
     }
 
     private var menuStatusLabel: String {
-        switch menuStatus {
+        if state.menuShowsLogin { return tr("未登录，字幕只显示原文；登录后继续翻译") }
+        if state.captionDisplayStatus.showsLabel { return state.captionStatusText }
+        if state.finishingCaptions { return tr("已停止采音，正在完成最后一句…") }
+        return switch menuStatus {
         case .idle: tr("已停止")
         case .starting: tr("启动中…")
-        case .running: CaptionListeningStatus.text(silentTooLong: state.silentTooLong, audioStalled: state.audioStalled)
+        case .running: state.captionStatusText
         case .paused: tr("已暂停")
         case .translationPaused: tr("翻译已暂停")
         }
     }
 
+    private var menuAccessPresented: Binding<Bool> {
+#if SHOOT || DEBUG
+        // OPEN_MENU owns its guarded session lifecycle; dependency presentation stays inert.
+        if ShootSimulation.requestedOpenMenu {
+            return Binding(get: { false }, set: { if !$0 { menuPresented = false } })
+        }
+#endif
+        return $menuPresented
+    }
+
     var body: some Scene {
         MenuBarExtra {
+#if SHOOT
+            if !ShootAudioOnly.requested {
+                MenuContent(state: state, isPresented: $menuPresented)
+            }
+#else
             MenuContent(state: state, isPresented: $menuPresented)
+#endif
         } label: {
             Image(nsImage: BrandIcons.menuImage(menuStatus))
                 .renderingMode(.template)
                 .accessibilityIdentifier("kk-status-item")
                 .accessibilityLabel(tr("Kikishima 字幕") + " · " + menuStatusLabel)
                 .help(tr("Kikishima 字幕") + " · " + menuStatusLabel)
-                .onAppear { AppDelegate.openMainWindow = { openWindow(id: "main") }; AppDelegate.hostReady() }   // 状态栏图标常驻，启动即注入
+                .onAppear {
+                    AppDelegate.openMainWindow = { openWindow(id: "main") }
+                    AppDelegate.presentMenuPanel = { menuPresented = true }
+                    AppDelegate.hostReady()
+#if SHOOT || DEBUG
+                    if ShootSimulation.requestedOpenMenu { ShootOpenMenu.shared.start() }
+#endif
+                }   // 状态栏图标常驻，启动即注入
         }
-        .menuBarExtraAccess(isPresented: $menuPresented, statusItem: { AppDelegate.menuStatusButton = $0.button })
+        .menuBarExtraAccess(isPresented: menuAccessPresented, statusItem: { item in
+            AppDelegate.menuStatusButton = item.button
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedOpenMenu || ShootDiagnosticLog.shared?.enabled == true {
+                ShootOpenMenu.shared.discovered(item, present: { menuPresented = true })
+            }
+#endif
+        })
         .menuBarExtraStyle(.window)
 
         // 主窗口（左侧栏式；视觉归设计轮）
         Window("Kikishima", id: "main") {
+#if SHOOT
+            if !ShootAudioOnly.requested { MainWindowView() }
+#else
             MainWindowView()
+#endif
         }
         .defaultSize(width: 960, height: 620)
         .defaultLaunchBehavior(.suppressed)   // 启动不弹，等 hostReady / 用户「打开」
@@ -212,48 +276,95 @@ struct KikishimaApp: App {   // 入口在 main.swift（要先判断是不是 Chr
 }
 
 struct MenuContent: View {
+    @ObservedObject private var captionPanel = CaptionPanelController.shared
+    @Namespace private var menuFocusScope
+    @Environment(\.resetFocus) private var resetFocus
     @Bindable var state: CaptionState
     @Binding var isPresented: Bool
     @State private var quickTerm = ""
     @FocusState private var primaryFocused: Bool
     @State private var devices: [AudioDevices.Device] = []
-    @State private var currentDevice = ""
+    @State private var currentDevice = MenuOutputDevice.readName()
+    private var outputDeviceLabel: String { MenuOutputDevice.label(currentDevice, none: tr("无")) }
     private var meetingLocaleChoices: [String] {
         var choices = state.meetingLocales
         if !choices.contains(state.localeID) { choices.insert(state.localeID, at: 0) }
         return choices
     }
+    private var menuKeyboardPresented: Bool {
+#if SHOOT || DEBUG
+        if ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_RENDER"] != nil { return false }
+#endif
+        return isPresented
+    }
     private func refreshDevices() {
+        currentDevice = MenuOutputDevice.readName()
+#if SHOOT || DEBUG
+        if ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_RENDER"] != nil {
+            devices = []
+            return
+        }
+#endif
         devices = AudioDevices.outputDevices()
-        currentDevice = AudioDevices.defaultOutput().flatMap { AudioDevices.name(of: $0) } ?? ""
     }
 
     @Environment(\.colorScheme) private var colorScheme
-    private var warning: Bool { state.silentTooLong || state.audioStalled }
+    private var warning: Bool { state.captionDisplayStatus.showsLabel }
     private var brandRed: Color { KKColor.brand }
+
+    private var isListening: Bool { state.running && !state.paused && !state.resuming && !state.switchingMeetingLanguage }
+    // Menu-only English labels; shared caption labels remain unchanged.
+    private var menuCaptionOptions: [(String, String)] {
+        [(tr("双语"), "both"),
+         (captionDisplayText("仅译文"), "translation"),
+         (captionDisplayText("仅原文"), "source")]
+    }
+
+    private var statusLabel: String {
+        if state.menuShowsLogin { return tr("未登录，字幕只显示原文；登录后继续翻译") }
+        if state.captionDisplayStatus.showsLabel { return state.captionStatusText }
+        if state.finishingCaptions { return tr("已停止采音，正在完成最后一句…") }
+        return switch CaptionMenuStatus.resolve(running: state.running, starting: state.starting, paused: state.paused,
+            translationPaused: state.translationPaused, resuming: state.resuming,
+            switchingLanguage: state.switchingMeetingLanguage) {
+        case .idle: "Kikishima"
+        case .starting: tr("启动中…")
+        case .running: state.captionStatusText
+        case .paused: tr("已暂停")
+        case .translationPaused: tr("翻译已暂停")
+        }
+    }
 
     /// 状态块：运行中是墨色的岛回声（朱红点 + 电平 + 语言对 + 设备），空闲是 5% 灰卡
     private var statusBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(state.running ? (warning ? KKColor.warning : brandRed) : KKColor.textPrimary.opacity(0.25))
-                    .frame(width: 8, height: 8)
-                    .changeEffect(.glow(color: brandRed, radius: 8), value: state.running)
-                HStack(spacing: 3) {
-                    ForEach(0..<3, id: \.self) { i in
-                        Capsule().fill(state.running ? KKColor.historyInk.opacity(warning ? 0.35 : 0.9) : KKColor.textPrimary.opacity(0.25))
-                            .frame(width: 3, height: i == 1 ? 11 : 7)
+                if state.paused {
+                    Image(systemName: "pause.fill").foregroundStyle(KKColor.textSecondary)
+                } else {
+                    Circle()
+                        .fill(isListening ? (warning ? KKColor.warning : brandRed) : KKColor.textPrimary.opacity(0.25))
+                        .frame(width: 8, height: 8)
+                        .changeEffect(.glow(color: brandRed, radius: 8), value: state.running)
+                    HStack(spacing: 3) {
+                        ForEach(0..<3, id: \.self) { i in
+                            Capsule().fill(isListening ? KKColor.historyInk.opacity(warning ? 0.35 : 0.9) : KKColor.textPrimary.opacity(0.25))
+                                .frame(width: 3, height: i == 1 ? 11 : 7)
+                        }
                     }
                 }
-                Text(state.running ? CaptionListeningStatus.text(silentTooLong: state.silentTooLong, audioStalled: state.audioStalled) : "Kikishima").font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(warning && state.running ? KKColor.warning : KKColor.textPrimary)
+                Text(statusLabel).font(.system(size: 13, weight: .medium))
+                    .lineLimit(state.menuShowsLogin ? 2 : nil)
+                    .fixedSize(horizontal: false, vertical: state.menuShowsLogin)
+                    .foregroundStyle(warning && isListening ? KKColor.warning : KKColor.textPrimary)
                 Spacer()
             }
-            Text(state.status).font(.system(size: 11))
-                .foregroundStyle(warning && state.running ? KKColor.warning : KKColor.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if state.running {
+            if !state.menuShowsLogin && !state.paused && !state.captionDisplayStatus.showsLabel && state.status != statusLabel {
+                Text(state.status).font(.system(size: 11))
+                    .foregroundStyle(warning && isListening ? KKColor.warning : KKColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if isListening {
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(KKColor.historyInk.opacity(0.15))
@@ -264,8 +375,11 @@ struct MenuContent: View {
                 .accessibilityLabel(tr("音频电平"))
                 .animation(.linear(duration: 0.08), value: state.audioLevel)
             }
+            Text(tr("捕获范围：全部系统音频")).font(.system(size: 11)).foregroundStyle(KKColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 6) {
-                Text(tr("正在听：%@", currentDevice.isEmpty ? "?" : currentDevice)).font(.system(size: 11)).lineLimit(1)
+                Text(tr("输出设备：%@", outputDeviceLabel)).font(.system(size: 11))
+                    .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(KKColor.textSecondary)
                 Spacer()
                 Menu(tr("切换")) {
@@ -274,19 +388,26 @@ struct MenuContent: View {
                     }
                 }.kkFocusRing().buttonStyle(.automatic)
                 .menuStyle(.borderlessButton).controlSize(.small).fixedSize()
-                .accessibilityLabel(tr("切换音频来源，当前 %@", currentDevice.isEmpty ? tr("未知设备") : currentDevice))
+                .accessibilityLabel(tr("切换输出设备，当前 %@", outputDeviceLabel))
             }
         }
         .foregroundStyle(KKColor.textPrimary)
         .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(state.running ? KKColor.surfaceBase : KKColor.textPrimary.opacity(0.05)))
-        .environment(\.colorScheme, state.running ? .dark : colorScheme)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(isListening ? KKColor.surfaceBase : KKColor.textPrimary.opacity(0.05)))
+        .environment(\.colorScheme, isListening ? .dark : colorScheme)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: state.running)
     }
 
     var body: some View {
-        MacControlCenterMenu(isPresented: $isPresented, width: .custom(264), activateAppOnCommandSelection: false) {
+        MacControlCenterMenu(isPresented: $isPresented, width: .custom(304), activateAppOnCommandSelection: false) {
             statusBlock
+            if state.menuShowsLogin {
+                Button(tr("登录")) { state.mainSection = .settings; AppDelegate.enter() }
+                    .kkPrimaryButton()
+            } else if state.menuShowsUpgrade {
+                Button(tr("升级 Pro")) { state.openUpgrade() }
+                    .kkPrimaryButton()
+            }
 
             // 主操作：开始（品牌色）/ 停止（抬升底色）+ 暂停
             Button { state.toggle() } label: {
@@ -297,9 +418,11 @@ struct MenuContent: View {
             }
             .controlSize(.large)
             .kkPrimaryButton(active: state.running || state.starting)
+            .disabled(state.finishingCaptions)
             .keyboardShortcut(.defaultAction)
             .accessibilityIdentifier("kk-menu-primary")
             .focused($primaryFocused)
+            .prefersDefaultFocus(true, in: menuFocusScope)
             if state.running {
                 Button { state.paused ? state.resume() : state.pause() } label: {
                     Label(state.paused ? tr("继续字幕") : tr("暂停字幕"), systemImage: state.paused ? "play.circle" : "pause.circle").frame(maxWidth: .infinity)
@@ -310,22 +433,11 @@ struct MenuContent: View {
             HStack {
                 Text(tr("快捷键：%@", GlobalHotkey.displayText)).font(.caption2).foregroundStyle(KKColor.textTertiary)
                 Spacer()
-                if state.sessionToken.isEmpty {
-                    Text(tr("未登录 · 点「打开 Kikishima」登录")).font(.caption2).foregroundStyle(KKColor.textSecondary).lineLimit(1)
-                } else if state.plan != "pro", state.plan != "dev", state.usageQuota > 0 {
+                if !state.sessionToken.isEmpty, state.plan != "pro", state.plan != "dev", state.usageQuota > 0 {
                     Text(state.remainingText).font(.caption2).foregroundStyle((state.remainingMinutes ?? 99) < 5 ? AnyShapeStyle(KKColor.warning) : AnyShapeStyle(KKColor.textTertiary))
                 } else if state.plan == "pro" {
                     Text("Pro").font(.caption2).foregroundStyle(KKColor.textTertiary)
                 }
-            }
-            if !state.sessionToken.isEmpty, state.plan != "pro" && state.plan != "dev" {
-                Button(tr("升级 Pro")) { state.openUpgrade() }
-                    .kkPrimaryButton()
-            }
-            if state.audioStalled {
-                Text(tr("音频输入停止了：检查输出设备是否被拔掉")).font(.caption2).foregroundStyle(KKColor.warning).fixedSize(horizontal: false, vertical: true)
-            } else if state.silentTooLong {
-                Text(tr("20 秒没听到声音：检查会议是否在播放、输出设备是否正确")).font(.caption2).foregroundStyle(KKColor.warning).fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()
@@ -350,16 +462,18 @@ struct MenuContent: View {
             KKSegmentedPicker(title: tr("字幕位置"), selection: Binding(get: { state.captionSurface }, set: { state.selectCaptionSurface($0) }), options: [(tr("灵动岛"), "island"), (tr("桌面窗口"), "window")]).controlSize(.small).labelsHidden()
             .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("字幕位置"), selection: Binding(get: { state.captionSurface }, set: { state.selectCaptionSurface($0) }), options: [(tr("灵动岛"), "island"), (tr("桌面窗口"), "window")]) }
             Toggle(tr("紧凑字幕"), isOn: $state.compactCaptions).toggleStyle(KKSwitchToggleStyle()).accessibilityLabel(tr("紧凑字幕"))
-            KKSegmentedPicker(title: tr("显示内容"), selection: $state.captionDisplay, options: [(tr("双语"), "both"), (tr("仅译文"), "translation"), (tr("仅原文"), "source")]).controlSize(.small).labelsHidden()
-            .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("显示内容"), selection: $state.captionDisplay, options: [(tr("双语"), "both"), (tr("仅译文"), "translation"), (tr("仅原文"), "source")]) }
+            KKSegmentedPicker(title: tr("显示内容"), selection: $state.captionDisplay, options: menuCaptionOptions).controlSize(.small).labelsHidden()
+            .accessibilityRepresentation { CaptionSegmentAccessibility(title: tr("显示内容"), selection: $state.captionDisplay, options: menuCaptionOptions) }
             TextField(tr("这场会的词（回车添加到术语表）"), text: $quickTerm, prompt: Text(tr("这场会的词（回车添加到术语表）")).foregroundStyle(KKColor.textSecondary)).kkFocusRing()
                 .textFieldStyle(.roundedBorder).controlSize(.small)
+                .background(MenuTermFocusRingSuppression().allowsHitTesting(false).accessibilityHidden(true))
                 .accessibilityLabel(tr("这场会的词（回车添加到术语表）"))
                 .onSubmit { state.addGlossaryTerm(quickTerm); quickTerm = "" }
 
             Divider()
 
-            AccessibleMenuCommand(CaptionPanelController.shared.isVisible ? tr("隐藏字幕窗") : tr("显示字幕窗"), activatesApp: false, dismissesMenu: false) { CaptionPanelController.shared.toggleVisible(mode: state.effectiveMode) }
+            AccessibleMenuCommand(CaptionPanelController.shared.hasVisibleCaptions ? tr("隐藏字幕窗") : tr("显示字幕窗"), activatesApp: false, dismissesMenu: false) { CaptionPanelController.shared.toggleVisible(mode: state.effectiveMode) }
+            AccessibleMenuCommand(tr("回看本场字幕")) { CaptionReviewController.shared.show() }
             AccessibleMenuCommand(tr("重置字幕位置"), activatesApp: false) { CaptionPanelController.shared.show(); CaptionPanelController.shared.resetPlacement(mode: state.effectiveMode) }
             AccessibleMenuCommand(tr("打开记录文件夹"), activatesApp: false) {
                 try? FileManager.default.createDirectory(at: CaptionState.transcriptDir, withIntermediateDirectories: true)
@@ -380,9 +494,20 @@ struct MenuContent: View {
         .background(KKColor.surfaceBase)
         .buttonStyle(KKQuietButtonStyle())
         .kkNeutralControls()
-        .background(KKMenuKeyboardAccess(presented: isPresented).allowsHitTesting(false).accessibilityHidden(true))
+        .background(KKMenuKeyboardAccess(presented: menuKeyboardPresented).allowsHitTesting(false).accessibilityHidden(true))
+        .focusScope(menuFocusScope)
         .defaultFocus($primaryFocused, true)
-        .onChange(of: isPresented) { _, presented in primaryFocused = presented }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
+            guard isPresented, let window = notification.object as? NSWindow,
+                  window.accessibilityIdentifier() == "kk-menu-panel" else { return }
+            // KKMenuKeyboardAccess activates asynchronously. Reset AFTER AppKit restores
+            // the previous first responder, even when primaryFocused was already true.
+            resetFocus(in: menuFocusScope)
+        }
+        .onChange(of: isPresented) { _, presented in
+            primaryFocused = presented
+            if presented { refreshDevices(); resetFocus(in: menuFocusScope) }
+        }
         .onExitCommand {
             // Complete the native close before restoring focus. A binding-only
             // close can otherwise choose main after our restoration has run.
@@ -392,7 +517,13 @@ struct MenuContent: View {
             isPresented = false
             DispatchQueue.main.async { AppDelegate.restoreMenuStatusFocus() }
         }
-        .onAppear { primaryFocused = true; state.prewarm(); state.refreshPlan(); refreshDevices() }   // 点开菜单即预热 + 刷新档位 + 读设备，点「开始」时连接已就绪
+        .onAppear {
+            refreshDevices()
+#if SHOOT || DEBUG
+            if ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_RENDER"] != nil { return }
+#endif
+            primaryFocused = true; state.prewarm(); state.refreshPlan()
+        }   // 点开菜单即预热 + 刷新档位 + 读设备，点「开始」时连接已就绪
     }
 }
 
@@ -419,5 +550,30 @@ private struct AccessibleMenuCommand: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel(title)
+    }
+}
+
+/// Suppress only this field's native ring; kkFocusRing retains the app's orange ring.
+private struct MenuTermFocusRingSuppression: NSViewRepresentable {
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) { view.suppressRing() }
+
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); suppressRing() }
+        override func layout() { super.layout(); suppressRing() }
+        func suppressRing() {
+            guard window != nil, !bounds.isEmpty else { return }
+            let target = convert(bounds, to: nil)
+            func find(_ view: NSView) -> NSTextField? {
+                if let field = view as? NSTextField, field.isEditable,
+                   field.convert(field.bounds, to: nil).intersects(target) { return field }
+                return view.subviews.lazy.compactMap(find).first
+            }
+            var ancestor = superview
+            while let container = ancestor {
+                if let field = find(container) { field.focusRingType = .none; return }
+                ancestor = container.superview
+            }
+        }
     }
 }

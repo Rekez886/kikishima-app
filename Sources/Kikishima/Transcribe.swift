@@ -3,14 +3,15 @@
 import Foundation
 import Speech
 import AVFoundation
+import CoreMedia
 import OSLog
 
 private let logger = Logger(subsystem: "com.kikishima.mac", category: "Transcribe")
 
 /// 转写事件：volatile = 未定稿（会被替换），finalized = 定稿（往 committed 累加）
 enum TranscriptEvent {
-    case volatile(String)
-    case finalized(String)
+    case volatile(String, timing: ASRResultTiming? = nil)
+    case finalized(String, timing: ASRResultTiming? = nil)
     case error(String)
 }
 
@@ -44,6 +45,7 @@ final class TranscribeEngine {
     nonisolated(unsafe) private var inputBuilder: AsyncStream<AnalyzerInput>.Continuation?
     nonisolated(unsafe) private var analyzerFormat: AVAudioFormat?
     nonisolated(unsafe) private var converter: AVAudioConverter?
+    nonisolated(unsafe) private var timingTimeline: ASRTimingTimeline?
     private var resultsTask: Task<Void, Never>?
     /// 模型下载进度（0~1），无需下载时为 nil
     var onDownloadProgress: ((Double) -> Void)?
@@ -106,12 +108,14 @@ final class TranscribeEngine {
 
         // bufferingNewest：分析器卡住/挂掉时丢旧音频，而不是无限堆内存（2 小时会议 ~230 MB）
         let (stream, builder) = AsyncStream<AnalyzerInput>.makeStream(bufferingPolicy: .bufferingNewest(256))
-        lock.lock(); self.inputBuilder = builder; self.analyzerFormat = fmt; self.converter = nil; lock.unlock()
+        let recorder = TranslationTimingRecorder.shared
+        let timeline = recorder.enabled ? ASRTimingTimeline(sessionID: recorder.sessionID, analyzerID: recorder.nextID()) : nil
+        lock.lock(); self.timingTimeline = timeline; self.inputBuilder = builder; self.analyzerFormat = fmt; self.converter = nil; lock.unlock()
         try await analyzer.start(inputSequence: stream)
         if Task.isCancelled || gen != myGen {   // 取消/被接管在 analyzer.start 期间到达：只拆自己建的这套，不碰当前会话的
             builder.finish()
             Task { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
-            if gen == myGen { lock.lock(); inputBuilder = nil; analyzerFormat = nil; converter = nil; lock.unlock(); self.analyzer = nil; self.transcriber = nil }
+            if gen == myGen { lock.lock(); inputBuilder = nil; analyzerFormat = nil; converter = nil; timingTimeline = nil; lock.unlock(); self.analyzer = nil; self.transcriber = nil }
             throw CancellationError()
         }
 
@@ -120,16 +124,19 @@ final class TranscribeEngine {
                 for try await result in transcriber.results {
                     guard TranscriptionResultPolicy.accepts(resultGeneration: myGen, currentGeneration: self.gen,
                                                            draining: self.draining, finished: Task.isCancelled) else { return }
+                    let timing = timeline.map { ASRResultTiming($0.result(start: result.range.start.seconds,
+                        end: CMTimeRangeGetEnd(result.range).seconds, final: result.isFinal,
+                        at: ProcessInfo.processInfo.systemUptime)) }
                     let text = String(result.text.characters)
                     if result.isFinal {
-                        onEvent(.finalized(text))
+                        onEvent(.finalized(text, timing: timing))
                     } else {
-                        onEvent(.volatile(text))
+                        onEvent(.volatile(text, timing: timing))
                     }
                 }
             } catch {
                 // stop() 主动取消不算错误
-                if error is CancellationError || Task.isCancelled { return }
+                if error is CancellationError || Task.isCancelled || self.gen != myGen { return }
                 onEvent(.error(trAny("转写流中断：%@", error.localizedDescription)))
             }
         }
@@ -145,6 +152,7 @@ final class TranscribeEngine {
             converter?.primeMethod = .none
         }
         let converter = self.converter
+        let timeline = timingTimeline
         lock.unlock()
         guard let converter else { return }
         guard let src = AVAudioPCMBuffer(pcmFormat: sourceFormat, bufferListNoCopy: bufferList, deallocator: nil) else { return }
@@ -160,7 +168,15 @@ final class TranscribeEngine {
             return src
         }
         if convErr == nil, dst.frameLength > 0 {
-            inputBuilder.yield(AnalyzerInput(buffer: dst))
+            if let timeline {
+                timeline.feed(duration: Double(dst.frameLength) / analyzerFormat.sampleRate,
+                              at: ProcessInfo.processInfo.systemUptime) {
+                    if case .dropped = inputBuilder.yield(AnalyzerInput(buffer: dst)) { return true }
+                    return false
+                }
+            } else {
+                inputBuilder.yield(AnalyzerInput(buffer: dst))
+            }
         }
     }
 
@@ -170,7 +186,7 @@ final class TranscribeEngine {
         draining = true
         let builder = lock.withLock {
             let builder = inputBuilder
-            inputBuilder = nil; converter = nil; analyzerFormat = nil
+            inputBuilder = nil; converter = nil; analyzerFormat = nil; timingTimeline = nil
             return builder
         }
         builder?.finish()
@@ -194,16 +210,17 @@ final class TranscribeEngine {
         gen += 1
         lock.lock()
         let builder = inputBuilder
-        inputBuilder = nil; converter = nil; analyzerFormat = nil
+        inputBuilder = nil; converter = nil; analyzerFormat = nil; timingTimeline = nil
         lock.unlock()
         builder?.finish()
         let analyzer = self.analyzer
         let task = resultsTask
         resultsTask = nil
-        // 先让分析器把尾巴吐完再取消结果流，否则最后半句丢失
+        // Graceful draining belongs to finish(). Stop revokes result ownership
+        // immediately, including after a drain deadline or an interrupted start.
+        task?.cancel()
         Task {
-            try? await analyzer?.finalizeAndFinishThroughEndOfInput()
-            task?.cancel()
+            await analyzer?.cancelAndFinishNow()
         }
         self.analyzer = nil
         self.transcriber = nil

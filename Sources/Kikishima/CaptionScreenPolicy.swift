@@ -12,9 +12,11 @@ enum CaptionScreenPolicy {
             ?? (displays.isEmpty ? nil : 0)
     }
 
-    static func floatingFrame(screenFrame: CGRect, size: CGSize) -> CGRect {
+    /// Keep the capsule 8pt below the menu bar, centered on the full screen.
+    /// With an auto-hidden menu bar, visibleFrame.maxY equals the screen top.
+    static func floatingFrame(screenFrame: CGRect, visibleFrame: CGRect, size: CGSize) -> CGRect {
         CGRect(x: screenFrame.midX - size.width / 2,
-               y: screenFrame.maxY - 8 - size.height,
+               y: visibleFrame.maxY - 8 - size.height,
                width: size.width, height: size.height)
     }
 

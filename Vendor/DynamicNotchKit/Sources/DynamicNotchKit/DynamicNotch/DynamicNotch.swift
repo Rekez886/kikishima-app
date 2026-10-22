@@ -389,6 +389,10 @@ private extension DynamicNotch {
             y: screen.frame.maxY - size.height
         )
 
+#if SHOOT || DEBUG
+        NotificationCenter.default.post(name: .init("KikishimaShootFrameRequest"), object: panel,
+            userInfo: ["to": NSRect(origin: origin, size: size), "site": "\(#fileID):\(#line)"])
+#endif
         panel.setFrame(
             NSRect(
                 origin: origin,

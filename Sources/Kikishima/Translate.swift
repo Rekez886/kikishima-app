@@ -2,9 +2,144 @@
 import Foundation
 import Security
 
-// API key 存储。开发期用 app 私有文件（0600）：自签名证书不被钥匙串 ACL 信任，每次重编译都会重新要密码。
-// 正式 Developer ID 签名后切回钥匙串（保留 KeychainStore 实现）。
+/// Only the bounded numeric preflight snapshot is retained. Unknown response
+/// fields are never copied into diagnostics. Worker terminal logs use the same ID.
+struct WorkerPreflightTiming: Codable, Sendable {
+    struct Stages: Codable, Sendable {
+        var auth: Int?
+        var plan: Int?
+        var planVersion: Int?
+        var planLoad: Int?
+        var quota: Int?
+        var rate: Int?
+        var claim: Int?
+        var reserve: Int?
+        var upstreamHeaders: Int?
+        var settle: Int?
+        var d1: Int?
+        var values: [Int] { [auth, plan, planVersion, planLoad, quota, rate, claim, reserve, upstreamHeaders, settle, d1].compactMap { $0 } }
+    }
+    var v: Int
+    var id: Int
+    var route: Int
+    var elapsedMs: Int
+    var d1Calls: Int
+    var cache: Int?
+    var attempts: Int
+    var fallback: Int
+    var stages: Stages
+
+    static func parse(_ header: String?) -> Self? {
+        guard let header, header.utf8.count <= 2048,
+              let row = try? JSONDecoder().decode(Self.self, from: Data(header.utf8)),
+              row.v == 1, (0..<281_474_976_710_656).contains(row.id),
+              (0...1).contains(row.route), (0...10_000).contains(row.d1Calls),
+              (0...8).contains(row.attempts), (0...row.attempts).contains(row.fallback),
+              row.cache.map({ (0...2).contains($0) }) ?? true,
+              ([row.elapsedMs] + row.stages.values).allSatisfy({ (0...86_400_000).contains($0) }) else { return nil }
+        return row
+    }
+}
+
+/// Numeric-only optional task diagnostics. Dates in URLSessionTaskMetrics are
+/// deliberately ignored; all durations use monotonic process uptime.
+struct TranslationNetworkTiming: Sendable {
+    var subrequestIndex: Int
+    var subrequestCount: Int
+    var retry: Int
+    var connectionReused: Bool?
+    var transactionCount: Int?
+    var requestToHeadersMs: Int?
+    var headersToFirstMs: Int?
+    var headersToEndMs: Int?
+    var requestToEndMs: Int?
+    var worker: WorkerPreflightTiming?
+
+    static func sample(index: Int, count: Int, retry: Int, started: TimeInterval,
+                       headers: TimeInterval?, first: TimeInterval?, ended: TimeInterval,
+                       reused: Bool?, transactions: Int?) -> Self {
+        func ms(_ delta: TimeInterval) -> Int { Int((max(0, delta) * 1000).rounded()) }
+        return Self(subrequestIndex: index, subrequestCount: count, retry: retry,
+                    connectionReused: reused, transactionCount: transactions,
+                    requestToHeadersMs: headers.map { ms($0 - started) },
+                    headersToFirstMs: headers.flatMap { h in first.map { ms($0 - h) } },
+                    headersToEndMs: headers.map { ms(ended - $0) }, requestToEndMs: ms(ended - started))
+    }
+}
+
+private final class TranslationNetworkProbe: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private let started = ProcessInfo.processInfo.systemUptime
+    private var headers: TimeInterval?
+    private var first: TimeInterval?
+    private var ended: TimeInterval?
+    private var metricsArrived = false
+    private var emitted = false
+    private var row: TranslationNetworkTiming
+    private let report: @Sendable (TranslationNetworkTiming) -> Void
+
+    init(index: Int, count: Int, retry: Int, report: @escaping @Sendable (TranslationNetworkTiming) -> Void) {
+        row = TranslationNetworkTiming(subrequestIndex: index, subrequestCount: count, retry: retry)
+        self.report = report
+    }
+    func receivedHeaders(_ response: URLResponse? = nil) {
+        lock.withLock {
+            headers = ProcessInfo.processInfo.systemUptime
+            row.worker = WorkerPreflightTiming.parse((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "x-kikishima-timing"))
+        }
+    }
+    func receivedDelta(_ text: String) {
+        lock.withLock {
+            if first == nil, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                first = ProcessInfo.processInfo.systemUptime
+            }
+        }
+    }
+    func finish() {
+        lock.withLock { ended = ProcessInfo.processInfo.systemUptime }
+        emitIfReady()
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        lock.withLock {
+            row.connectionReused = metrics.transactionMetrics.last?.isReusedConnection
+            row.transactionCount = metrics.transactionMetrics.count
+            metricsArrived = true
+        }
+        emitIfReady()
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        // Failed tasks may have no transaction metrics. Retain an unknown reuse
+        // value rather than dropping the subrequest's monotonic measurements.
+        lock.withLock { metricsArrived = true }
+        emitIfReady()
+    }
+    private func emitIfReady() {
+        let sample: TranslationNetworkTiming? = lock.withLock {
+            guard !emitted, metricsArrived, let ended else { return nil }
+            emitted = true
+            let worker = row.worker
+            row = .sample(index: row.subrequestIndex, count: row.subrequestCount, retry: row.retry,
+                          started: started, headers: headers, first: first, ended: ended,
+                          reused: row.connectionReused, transactions: row.transactionCount)
+            row.worker = worker
+            return row
+        }
+        if let sample { report(sample) }
+    }
+}
+
+// API key 存储 uses the same build isolation as account sessions. Only the installed
+// release bundle may migrate or clean up its legacy plaintext key.
 enum Keychain {
+    struct LegacyFile {
+        var read: () -> String
+        var remove: () -> Void
+        static let production = LegacyFile(
+            read: { (try? String(contentsOf: fileURL, encoding: .utf8)) ?? "" },
+            remove: { try? FileManager.default.removeItem(at: fileURL) }
+        )
+    }
+
     private static var fileURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = base.appendingPathComponent("Kikishima", isDirectory: true)
@@ -18,55 +153,45 @@ enum Keychain {
         return url
     }
 
-    static func loadKey() -> String {
-        let stored = KeychainStore.loadKey()
+    static func loadKey(scope: CredentialScope = .current, keychain: CredentialKeychain = .system,
+                        legacy: LegacyFile = .production) -> String {
+        guard scope != .disabled else { return "" }
+        let stored = KeychainStore.loadKey(scope: scope, keychain: keychain)
+        guard scope == .production else { return stored }
         if !stored.isEmpty {
-            try? FileManager.default.removeItem(at: fileURL)
+            legacy.remove()
             return stored
         }
-        let file = (try? String(contentsOf: fileURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !file.isEmpty, KeychainStore.saveKey(file) {
-            try? FileManager.default.removeItem(at: fileURL)
+        let file = legacy.read().trimmingCharacters(in: .whitespacesAndNewlines)
+        if !file.isEmpty, KeychainStore.saveKey(file, scope: scope, keychain: keychain) {
+            legacy.remove()
         }
         return file
     }
 
-    static func saveKey(_ key: String) {
-        if KeychainStore.saveKey(key) {
-            try? FileManager.default.removeItem(at: fileURL)
+    static func saveKey(_ key: String, scope: CredentialScope = .current, keychain: CredentialKeychain = .system,
+                        legacy: LegacyFile = .production) {
+        guard scope != .disabled else { return }
+        if KeychainStore.saveKey(key, scope: scope, keychain: keychain), scope == .production {
+            legacy.remove()
         }
     }
 }
 
 enum KeychainStore {
-    private static let service = "Kikishima"
     private static let account = "openai-key"
 
     @discardableResult
-    static func saveKey(_ key: String) -> Bool {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                    kSecAttrService as String: service,
-                                    kSecAttrAccount as String: account]
-        SecItemDelete(query as CFDictionary)
+    static func saveKey(_ key: String, scope: CredentialScope = .current,
+                        keychain: CredentialKeychain = .system) -> Bool {
+        guard scope != .disabled else { return false }
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return true }
-        var add = query
-        add[kSecValueData as String] = Data(trimmed.utf8)
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(add as CFDictionary, nil)
-        return status == errSecSuccess || status == errSecDuplicateItem
+        return keychain.write(scope.keychainService, account, trimmed)
     }
 
-    static func loadKey() -> String {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                    kSecAttrService as String: service,
-                                    kSecAttrAccount as String: account,
-                                    kSecReturnData as String: true,
-                                    kSecMatchLimit as String: kSecMatchLimitOne]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return "" }
-        return String(data: data, encoding: .utf8) ?? ""
+    static func loadKey(scope: CredentialScope = .current, keychain: CredentialKeychain = .system) -> String {
+        guard scope != .disabled else { return "" }
+        return keychain.read(scope.keychainService, account)
     }
 }
 
@@ -82,7 +207,74 @@ enum TranslateFailure: Sendable {
     case cancelled
 }
 
+struct TranslationTimeouts: Sendable {
+    var total: TimeInterval = 30
+    var headers: TimeInterval = 8
+    var firstText: TimeInterval = 12
+    var idle: TimeInterval = 8
+}
+
+/// Each network attempt shares its group's monotonic deadline. Cancelling the
+/// Swift task alone after AsyncBytes headers is insufficient: cancel its data task too.
+private final class TranslationAttemptDeadline: @unchecked Sendable {
+    private let lock = NSLock()
+    private let deadline: TimeInterval
+    private var timer: DispatchWorkItem?
+    private var alarmID = UUID()
+    private var ended = false
+    private var expired = false
+    private var cancelled = false
+    private var network: URLSessionTask?
+    private var cancelTask: (() -> Void)?
+    init(deadline: TimeInterval) { self.deadline = deadline }
+    var timedOut: Bool { lock.withLock { expired } }
+    func attach(_ task: Task<Void, Never>) {
+        let stop = lock.withLock { cancelTask = { task.cancel() }; return cancelled }
+        if stop { task.cancel() }
+    }
+    func attachNetwork(_ task: URLSessionTask) {
+        let stop = lock.withLock { network = task; return cancelled || ended }
+        if stop { task.cancel() }
+    }
+    func arm(_ duration: TimeInterval) {
+        lock.lock()
+        guard !ended, !cancelled else { lock.unlock(); return }
+        alarmID = UUID()
+        let ticket = alarmID
+        timer?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.expire(ticket) }
+        timer = work
+        let delay = max(0, min(duration, deadline - ProcessInfo.processInfo.systemUptime))
+        lock.unlock()
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay, execute: work)
+    }
+    private func expire(_ ticket: UUID) {
+        lock.lock()
+        guard !ended, !cancelled, alarmID == ticket else { lock.unlock(); return }
+        expired = true; cancelled = true
+        let stop = cancelTask, task = network
+        lock.unlock()
+        task?.cancel(); stop?()
+    }
+    func cancel() {
+        let pair = lock.withLock { cancelled = true; timer?.cancel(); return (network, cancelTask) }
+        pair.0?.cancel(); pair.1?()
+    }
+    func close() {
+        let task = lock.withLock { ended = true; timer?.cancel(); cancelTask = nil; return network }
+        task?.cancel()
+    }
+}
+
 final class Translator {
+    let costSessionID: UUID
+    private let transport: URLSession
+    private let timeouts: TranslationTimeouts
+    init(costSessionID: UUID = UUID(), transport: URLSession = Translator.session, timeouts: TranslationTimeouts = .init()) {
+        self.costSessionID = costSessionID
+        self.transport = transport
+        self.timeouts = timeouts
+    }
     var model: String = "gpt-5.6-luna"
     var glossary: String = ""           // 术语表原文（每行一条，「→」指定译法）
     var targetLanguage: String = "Simplified Chinese"   // 目标语言（英文名，进 prompt）
@@ -90,13 +282,13 @@ final class Translator {
     var onFailure: (@Sendable (TranslateFailure) -> Void)?
     // 引擎模式：proxy = 走自家 Cloudflare 代理（订阅，prompt 在服务器组装）；byo = 用户自备 OpenAI key
     var useProxy = true
-    var proxyURL = "https://api.kikishima.com"
+    var proxyURL = SessionControls.defaultAPI
     var sessionToken = ""
     private var useReasoningEffort = true
     private var usePriority = true      // OpenAI priority 通道（不支持时自动降级）
     private var useTemperature = true   // 低温度压创造性（不支持时自动降级）
 
-    /// 一次请求 15 秒硬超时：会议里一句话等不了更久；挂起的请求会堵住 inflight 名额
+    /// URLSession inactivity safety net; the monotonic group/phase watchdog is the hard limit.
     static let requestTimeout: TimeInterval = 15
     /// 专用会话：连接复用 + 超时；不用 shared 以免被别处请求拖慢
     static let session: URLSession = {
@@ -110,20 +302,26 @@ final class Translator {
     private let tasksLock = NSLock()
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var groups: [UUID: Task<Void, Never>] = [:]
+    private var deadlines: [UUID: TranslationAttemptDeadline] = [:]
     private final class TaskBox { var task: Task<Void, Never>? }
-    private func track(_ id: UUID, _ t: Task<Void, Never>) { tasksLock.lock(); tasks[id] = t; tasksLock.unlock() }
+    private func track(_ id: UUID, _ t: Task<Void, Never>, _ deadline: TranslationAttemptDeadline) { tasksLock.lock(); tasks[id] = t; deadlines[id] = deadline; tasksLock.unlock() }
     /// 只在登记的还是「自己」时才注销：BYO 400 降级会用同一 id 重发，外层结束不能把内层的登记抹掉
     private func untrack(_ id: UUID, _ me: Task<Void, Never>?) {
-        tasksLock.lock(); if let me, tasks[id] == me { tasks[id] = nil }; tasksLock.unlock()
+        tasksLock.lock(); if let me, tasks[id] == me { tasks[id] = nil; deadlines[id] = nil }; tasksLock.unlock()
     }
     /// 停止字幕时取消所有在途请求（否则 onDone 迟到会把 inflight 计数和 UI 弄乱）
     func cancel(_ id: UUID) {
-        tasksLock.lock(); let task = tasks.removeValue(forKey: id); let group = groups.removeValue(forKey: id); tasksLock.unlock()
-        group?.cancel(); task?.cancel()
+        tasksLock.lock(); let task = tasks.removeValue(forKey: id); let group = groups.removeValue(forKey: id); let deadline = deadlines.removeValue(forKey: id)
+        // Mark the group before another part can register under this lock.
+        group?.cancel()
+        tasksLock.unlock()
+        deadline?.cancel(); task?.cancel()
     }
     func cancelAll() {
-        tasksLock.lock(); let all = tasks; let allGroups = groups; tasks = [:]; groups = [:]; tasksLock.unlock()
-        allGroups.values.forEach { $0.cancel() }; all.values.forEach { $0.cancel() }
+        tasksLock.lock(); let all = tasks; let allGroups = groups; let allDeadlines = deadlines; tasks = [:]; groups = [:]; deadlines = [:]
+        allGroups.values.forEach { $0.cancel() }
+        tasksLock.unlock()
+        allDeadlines.values.forEach { $0.cancel() }; all.values.forEach { $0.cancel() }
     }
     private func trackGroup(_ id: UUID, _ task: Task<Void, Never>) { tasksLock.lock(); groups[id] = task; tasksLock.unlock() }
     private func finishGroup(_ id: UUID, _ me: Task<Void, Never>?) { tasksLock.lock(); if let me, groups[id] == me { groups[id] = nil }; tasksLock.unlock() }
@@ -192,7 +390,7 @@ final class Translator {
     func warmup() {
         if useProxy {
             guard let url = URL(string: proxyURL.trimmingCharacters(in: .init(charactersIn: "/")) + "/health") else { return }
-            Self.session.dataTask(with: URLRequest(url: url)).resume()
+            transport.dataTask(with: URLRequest(url: url)).resume()
             return
         }
         let key = Keychain.loadKey()
@@ -203,25 +401,29 @@ final class Translator {
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         let body: [String: Any] = ["model": model, "messages": [["role": "user", "content": "hi"]], "max_completion_tokens": 1]
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        Self.session.dataTask(with: req).resume()
+        transport.dataTask(with: req).resume()
     }
 
     /// Freeze source-order context at the caller. Every retry and bounded subrequest
     /// uses that context, never the last network request to happen to execute.
     func translate(id: UUID = UUID(), chunk: String, previous: String = "",
+                   timing: (@Sendable (TranslationNetworkTiming) -> Void)? = nil,
                    onDelta: @escaping @Sendable (String) -> Void,
                    onDone: @escaping @Sendable (String?) -> Void) {
         let parts = TranslationText.parts(TranslationText.acknowledgement(chunk) ?? chunk)
         guard !parts.isEmpty else { onDone(nil); return }
+        let deadline = ProcessInfo.processInfo.systemUptime + timeouts.total
         let groupBox = TaskBox()
         let group = Task {
             defer { self.finishGroup(id, groupBox.task) }
             var finished = "", context = previous
+            var timingIndex = 0
             for part in parts {
                 guard !Task.isCancelled else { onDone(nil); return }
+                timingIndex += 1
                 let prefix = finished
                 let result: String? = await withCheckedContinuation { continuation in
-                    self.translatePart(id: id, chunk: part, previous: context, cancelled: { groupBox.task?.isCancelled ?? false }, onDelta: { live in
+                    self.translatePart(deadline: deadline, id: id, chunk: part, previous: context, timing: timing, timingIndex: timingIndex, timingCount: parts.count, cancelled: { groupBox.task?.isCancelled ?? false }, onDelta: { live in
                         onDelta(prefix.isEmpty ? live : prefix + " " + live)
                     }, onDone: { continuation.resume(returning: $0) })
                 }
@@ -235,10 +437,14 @@ final class Translator {
         trackGroup(id, group)
     }
 
-    private func translatePart(id: UUID, chunk: String, previous: String, cancelled: @escaping @Sendable () -> Bool,
+    private func translatePart(deadline: TimeInterval, id: UUID, chunk: String, previous: String,
+                   timing: (@Sendable (TranslationNetworkTiming) -> Void)? = nil,
+                   timingIndex: Int = 1, timingCount: Int = 1, timingRetry: Int = 0, cancelled: @escaping @Sendable () -> Bool,
                    onDelta: @escaping @Sendable (String) -> Void,
                    onDone: @escaping @Sendable (String?) -> Void) {
-        if useProxy { translateViaProxy(id: id, chunk: chunk, previous: previous, cancelled: cancelled, onDelta: onDelta, onDone: onDone); return }
+        guard !cancelled() else { onDone(nil); return }
+        guard deadline > ProcessInfo.processInfo.systemUptime else { report(nil, URLError(.timedOut)); onDone(nil); return }
+        if useProxy { translateViaProxy(deadline: deadline, id: id, chunk: chunk, previous: previous, timing: timing, timingIndex: timingIndex, timingCount: timingCount, timingRetry: timingRetry, cancelled: cancelled, onDelta: onDelta, onDone: onDone); return }
         let key = Keychain.loadKey()
         guard !key.isEmpty else { onDone(nil); return }
         var messages: [[String: String]] = [
@@ -256,18 +462,35 @@ final class Translator {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        req.timeoutInterval = Self.requestTimeout
+        req.timeoutInterval = min(Self.requestTimeout, max(0.001, deadline - ProcessInfo.processInfo.systemUptime))
 
         let box = TaskBox()
+        let watchdog = TranslationAttemptDeadline(deadline: deadline)
+        watchdog.arm(timeouts.headers)
         let t = Task {
-            defer { self.untrack(id, box.task) }
+            defer { watchdog.close(); self.untrack(id, box.task) }
+            let probe: TranslationNetworkProbe?
+            if let timing {
+                probe = TranslationNetworkProbe(index: timingIndex, count: timingCount, retry: timingRetry, report: timing)
+            } else { probe = nil }
+            defer { probe?.finish() }
             do {
-                let (bytes, resp) = try await Self.session.bytes(for: req)
+                let (bytes, resp): (URLSession.AsyncBytes, URLResponse)
+                if let probe {
+                    (bytes, resp) = try await self.transport.bytes(for: req, delegate: probe)
+                    probe.receivedHeaders()
+                } else {
+                    (bytes, resp) = try await self.transport.bytes(for: req)
+                }
+                watchdog.attachNetwork(bytes.task)
+                watchdog.arm(self.timeouts.firstText)
+                if Task.isCancelled { if watchdog.timedOut { self.report(nil, URLError(.timedOut)) }; onDone(nil); return }
                 if let http = resp as? HTTPURLResponse, http.statusCode == 400 {
+                    bytes.task.cancel()
                     // 参数不被接受时逐个降级重试：先 priority 再 reasoning_effort
-                    if self.usePriority { self.usePriority = false; self.translatePart(id: id, chunk: chunk, previous: previous, cancelled: cancelled, onDelta: onDelta, onDone: onDone); return }
-                    if self.useTemperature { self.useTemperature = false; self.translatePart(id: id, chunk: chunk, previous: previous, cancelled: cancelled, onDelta: onDelta, onDone: onDone); return }
-                    if self.useReasoningEffort { self.useReasoningEffort = false; self.translatePart(id: id, chunk: chunk, previous: previous, cancelled: cancelled, onDelta: onDelta, onDone: onDone); return }
+                    if self.usePriority { self.usePriority = false; self.translatePart(deadline: deadline, id: id, chunk: chunk, previous: previous, timing: timing, timingIndex: timingIndex, timingCount: timingCount, timingRetry: timingRetry + 1, cancelled: cancelled, onDelta: onDelta, onDone: onDone); return }
+                    if self.useTemperature { self.useTemperature = false; self.translatePart(deadline: deadline, id: id, chunk: chunk, previous: previous, timing: timing, timingIndex: timingIndex, timingCount: timingCount, timingRetry: timingRetry + 1, cancelled: cancelled, onDelta: onDelta, onDone: onDone); return }
+                    if self.useReasoningEffort { self.useReasoningEffort = false; self.translatePart(deadline: deadline, id: id, chunk: chunk, previous: previous, timing: timing, timingIndex: timingIndex, timingCount: timingCount, timingRetry: timingRetry + 1, cancelled: cancelled, onDelta: onDelta, onDone: onDone); return }
                 }
                 guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
                     self.report((resp as? HTTPURLResponse)?.statusCode, nil)
@@ -275,31 +498,37 @@ final class Translator {
                 }
                 var stream = TranslationStream()
                 for try await line in bytes.lines {
-                    if Task.isCancelled { onDone(nil); return }
+                    if Task.isCancelled { if watchdog.timedOut { self.report(nil, URLError(.timedOut)) }; onDone(nil); return }
                     let before = stream.text
                     stream.accept(line)
-                    if stream.text != before { onDelta(stream.text) }
+                    if stream.text != before {
+                        if !stream.text.dropFirst(before.count).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { watchdog.arm(self.timeouts.idle) }
+                        probe?.receivedDelta(stream.text); onDelta(stream.text)
+                    }
                     if stream.done { break }
                 }
-                if Task.isCancelled { onDone(nil); return }
+                if Task.isCancelled { if watchdog.timedOut { self.report(nil, URLError(.timedOut)) }; onDone(nil); return }
                 if stream.completed == nil {
                     self.onFailure?(.network(trAny("部分字幕未翻译完成，可重试")))
                 }
                 onDone(stream.completed)
             } catch {
-                self.report(nil, error)
+                self.report(nil, watchdog.timedOut ? URLError(.timedOut) : error)
                 onDone(nil)
             }
         }
         box.task = t
-        track(id, t)
-        if cancelled() { t.cancel() }
+        watchdog.attach(t)
+        track(id, t, watchdog)
+        if cancelled() { watchdog.cancel() }
     }
 }
 
 extension Translator {
     /// 代理模式：只发片段+上下文+目标语+术语表，服务器组 prompt、注入 key、记账；回的是同样的 OpenAI SSE
-    func translateViaProxy(id: UUID, chunk: String, previous: String, cancelled: @escaping @Sendable () -> Bool,
+    private func translateViaProxy(deadline: TimeInterval, id: UUID, chunk: String, previous: String,
+                           timing: (@Sendable (TranslationNetworkTiming) -> Void)? = nil,
+                           timingIndex: Int = 1, timingCount: Int = 1, timingRetry: Int = 0, cancelled: @escaping @Sendable () -> Bool,
                            onDelta: @escaping @Sendable (String) -> Void,
                            onDone: @escaping @Sendable (String?) -> Void) {
         guard !sessionToken.isEmpty, let url = URL(string: proxyURL.trimmingCharacters(in: .init(charactersIn: "/")) + "/translate") else {
@@ -312,18 +541,39 @@ extension Translator {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(sessionToken)", forHTTPHeaderField: "Authorization")
+        req.setValue(String(max(0, Int((deadline - ProcessInfo.processInfo.systemUptime) * 1000))), forHTTPHeaderField: "X-Kikishima-Timeout-Ms")
+        req.setValue(costSessionID.uuidString.lowercased(), forHTTPHeaderField: "X-Kikishima-Cost-Session")
+        req.setValue("\(id.uuidString.lowercased()):\(timingIndex)", forHTTPHeaderField: "X-Kikishima-Cost-Operation")
+        if timing != nil { req.setValue("1", forHTTPHeaderField: "X-Kikishima-Timing") }
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        req.timeoutInterval = Self.requestTimeout
+        req.timeoutInterval = min(Self.requestTimeout, max(0.001, deadline - ProcessInfo.processInfo.systemUptime))
         let box = TaskBox()
+        let watchdog = TranslationAttemptDeadline(deadline: deadline)
+        watchdog.arm(timeouts.headers)
         let t = Task {
-            defer { self.untrack(id, box.task) }
+            defer { watchdog.close(); self.untrack(id, box.task) }
+            let probe: TranslationNetworkProbe?
+            if let timing {
+                probe = TranslationNetworkProbe(index: timingIndex, count: timingCount, retry: timingRetry, report: timing)
+            } else { probe = nil }
+            defer { probe?.finish() }
             do {
-                let (bytes, resp) = try await Self.session.bytes(for: req)
+                let (bytes, resp): (URLSession.AsyncBytes, URLResponse)
+                if let probe {
+                    (bytes, resp) = try await self.transport.bytes(for: req, delegate: probe)
+                    probe.receivedHeaders(resp)
+                } else {
+                    (bytes, resp) = try await self.transport.bytes(for: req)
+                }
+                watchdog.attachNetwork(bytes.task)
+                watchdog.arm(self.timeouts.firstText)
+                if Task.isCancelled { if watchdog.timedOut { self.report(nil, URLError(.timedOut)) }; onDone(nil); return }
                 guard let http = resp as? HTTPURLResponse else { onDone(nil); return }
                 if http.statusCode != 200 {
                     // 非 200：读完正文取服务器的 error 代号，再分类
                     var raw = ""
                     for try await line in bytes.lines { raw += line; if raw.count > 8192 { break } }   // 网关/WAF 的大 HTML 错误页不无限累积
+                    if Task.isCancelled { if watchdog.timedOut { self.report(nil, URLError(.timedOut)) }; onDone(nil); return }
                     let code = (try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])?["error"] as? String ?? ""
                     if http.statusCode == 429 {
                         let failure = HTTPFailurePolicy.classify(status: http.statusCode, errorCode: code)
@@ -347,25 +597,29 @@ extension Translator {
                 }
                 var stream = TranslationStream()
                 for try await line in bytes.lines {
-                    if Task.isCancelled { onDone(nil); return }
+                    if Task.isCancelled { if watchdog.timedOut { self.report(nil, URLError(.timedOut)) }; onDone(nil); return }
                     let before = stream.text
                     stream.accept(line)
-                    if stream.text != before { onDelta(stream.text) }
+                    if stream.text != before {
+                        if !stream.text.dropFirst(before.count).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { watchdog.arm(self.timeouts.idle) }
+                        probe?.receivedDelta(stream.text); onDelta(stream.text)
+                    }
                     if stream.done { break }
                 }
-                if Task.isCancelled { onDone(nil); return }
+                if Task.isCancelled { if watchdog.timedOut { self.report(nil, URLError(.timedOut)) }; onDone(nil); return }
                 if stream.completed == nil {
                     self.onFailure?(.network(trAny("部分字幕未翻译完成，可重试")))
                 }
                 onDone(stream.completed)
             } catch {
-                self.report(nil, error)
+                self.report(nil, watchdog.timedOut ? URLError(.timedOut) : error)
                 onDone(nil)
             }
         }
         box.task = t
-        track(id, t)
-        if cancelled() { t.cancel() }
+        watchdog.attach(t)
+        track(id, t, watchdog)
+        if cancelled() { watchdog.cancel() }
     }
 }
 

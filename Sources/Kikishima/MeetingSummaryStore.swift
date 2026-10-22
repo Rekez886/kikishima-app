@@ -66,6 +66,27 @@ actor MeetingSummaryStore {
         return document
     }
 
+    /// Caption recovery changes only translations. Keep an already matching
+    /// summary associated with the new bytes, including after a Finder rename.
+    /// A previously stale fingerprint must stay stale.
+    func replaceTranscript(expected: String, with replacement: String, at url: URL) throws {
+        let association = try associatedDocument(for: url)
+        let priorFingerprint = SHA256.hash(data: Data(expected.utf8)).map { String(format: "%02x", $0) }.joined()
+        try TranscriptWriter.replaceSynchronously(expected: expected, with: replacement, at: url)
+        guard let association, association.document.sourceFingerprint == priorFingerprint else { return }
+        var document = association.document
+        document.transcriptFileName = url.lastPathComponent
+        document.sourceFingerprint = SHA256.hash(data: Data(replacement.utf8)).map { String(format: "%02x", $0) }.joined()
+        do {
+            try atomicWrite(try encoder.encode(document), to: association.url)
+        } catch {
+            // If the sidecar cannot follow, undo only our own unchanged write.
+            try TranscriptWriter.replaceSynchronously(expected: replacement, with: expected, at: url,
+                                                       checkingCancellation: false)
+            throw error
+        }
+    }
+
     func renameRecord(from sourceURL: URL, to destinationURL: URL) throws {
         let source = sourceURL.standardizedFileURL
         let destination = destinationURL.standardizedFileURL

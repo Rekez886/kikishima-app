@@ -1,6 +1,15 @@
 """Loopback-only fake SSE. No production endpoint, account or meeting data."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import json, sys, time
+import json, socketserver, sys, time
+
+class LoopbackHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # Bind without reverse DNS, which can exceed the 5 s port-file wait.
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_POST(self):
@@ -18,6 +27,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.send_header('Content-Length',str(len(data))); self.end_headers()
         try: self.wfile.write(data)
         except (BrokenPipeError, ConnectionResetError): pass
-server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+server=LoopbackHTTPServer(('127.0.0.1',0),Handler)
 with open(sys.argv[1],'w') as f: f.write(str(server.server_port))
 server.serve_forever()

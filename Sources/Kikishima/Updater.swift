@@ -6,6 +6,14 @@ import Sparkle
 @MainActor
 final class UpdaterController {
     static let shared = UpdaterController()
+    #if SANDBOX
+    private init() {}
+    func checkForUpdates() {}
+    var automaticallyChecks: Bool { get { false } set {} }
+    var automaticallyDownloads: Bool { get { false } set {} }
+    var canCheck: Bool { false }
+    var lastCheck: Date? { nil }
+    #else
     private let controller: SPUStandardUpdaterController
 
     private init() {
@@ -29,4 +37,5 @@ final class UpdaterController {
     }
     var canCheck: Bool { updater.canCheckForUpdates }
     var lastCheck: Date? { updater.lastUpdateCheckDate }
+    #endif
 }

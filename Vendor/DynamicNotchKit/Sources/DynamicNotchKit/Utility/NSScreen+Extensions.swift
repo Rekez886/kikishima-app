@@ -7,6 +7,21 @@
 
 import SwiftUI
 
+#if SHOOT
+/// Installed by the SHOOT host before DynamicNotch selects its presentation path.
+public enum ShootNotchInjection {
+    nonisolated(unsafe) public static var screen: NSScreen?
+    nonisolated(unsafe) public static var size: NSSize?
+    nonisolated(unsafe) public static var menuBarHeight: CGFloat?
+    public static func menuBarHeight(for candidate: NSScreen) -> CGFloat? {
+        candidate === screen ? menuBarHeight : nil
+    }
+    public static func size(for candidate: NSScreen) -> NSSize? {
+        candidate === screen ? size : nil
+    }
+}
+#endif
+
 extension NSScreen {
     static var screenWithMouse: NSScreen? {
         let mouseLocation = NSEvent.mouseLocation
@@ -17,12 +32,18 @@ extension NSScreen {
     }
 
     var hasNotch: Bool {
+#if SHOOT
+        if ShootNotchInjection.size(for: self) != nil { return true }
+#endif
         if auxiliaryTopLeftArea != nil && auxiliaryTopRightArea != nil { return true }
         guard let number = deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }
         return CGDisplayIsBuiltin(CGDirectDisplayID(number.uint32Value)) != 0 && safeAreaInsets.top > 0
     }
 
     var notchSize: NSSize? {
+#if SHOOT
+        if let size = ShootNotchInjection.size(for: self) { return size }
+#endif
         guard
             let topLeftNotchpadding: CGFloat = auxiliaryTopLeftArea?.width,
             let topRightNotchpadding: CGFloat = auxiliaryTopRightArea?.width
@@ -46,7 +67,10 @@ extension NSScreen {
     }
 
     var menubarHeight: CGFloat {
-        frame.maxY - visibleFrame.maxY
+#if SHOOT
+        if let height = ShootNotchInjection.menuBarHeight(for: self) { return height }
+#endif
+        return frame.maxY - visibleFrame.maxY
     }
 
     var notchFrameWithMenubarAsBackup: NSRect {

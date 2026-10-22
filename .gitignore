@@ -4,3 +4,5 @@ build/
 dist/
 .worktrees/
 .build/
+build-sandbox/
+.build-sandbox/

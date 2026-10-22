@@ -2,6 +2,24 @@
 import AppKit
 
 #if SHOOT || DEBUG
+let shootProcessStart = DispatchTime.now().uptimeNanoseconds
+ShootDiagnosticLog.start(at: shootProcessStart)
+MainActor.assumeIsolated {
+    ShootWindowLog.start()
+    if ShootSimulation.requestedOpenMenu || ShootDiagnosticLog.shared?.enabled == true {
+        ShootOpenMenu.shared.start(openMenu: ShootSimulation.requestedOpenMenu)
+    }
+}
+#endif
+
+#if SHOOT
+MainActor.assumeIsolated { _ = ShootNotch.configuration }
+#endif
+
+#if SHOOT && SCREENSHOT_DIFF
+MainActor.assumeIsolated { if ShootRender.runIfRequested() { exit(0) } }
+#endif
+#if SHOOT || DEBUG
 MainActor.assumeIsolated {
 #if SHOOT || DEBUG
 if ShootSimulation.runIfRequested() { exit(0) }
