@@ -16,7 +16,8 @@ LOCAL_PATTERNS = [
 ]
 
 PATTERNS = {
-    "local user path": re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+"),
+    # Exempt only the documented fixture user names example and example2.
+    "local user path": re.compile(r"/(?:Users|home)/(?!example2?(?![A-Za-z0-9._-]))[A-Za-z0-9._-]+"),
     "private key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     "OpenAI-style key": re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
     "GitHub token": re.compile(r"(?:ghp_|github_pat_)[A-Za-z0-9_]{20,}"),
