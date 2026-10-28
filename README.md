@@ -148,3 +148,5 @@ redistribution. See `TRADEMARKS.md`.
 ## License
 
 MIT. See `LICENSE`.
+
+Copyright (c) 2026 Lingjie Yang, released under the MIT License (see LICENSE).
