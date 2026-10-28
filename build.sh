@@ -29,6 +29,41 @@ BIN="$SCRATCH/arm64-apple-macosx/release/Kikishima"
 [ -x "$BIN" ] || BIN="$SCRATCH/release/Kikishima"
 [ -x "$BIN" ] || { echo "swift build failed"; exit 1; }
 cp "$BIN" "$APP/Contents/MacOS/Kikishima"
+# MLX GPU shaders. SwiftPM cannot build Metal shaders (mlx-swift README), and the
+# MLX runtime looks for mlx.metallib next to the executable, i.e. Contents/MacOS.
+# Compiled here, before the codesign step below, so the app signature covers it.
+# Requires Apple's Metal Toolchain: xcodebuild -downloadComponent MetalToolchain
+MIN_MACOS="$(sed -n 's/.*platforms: \[\.macOS("\([0-9][0-9.]*\)")\].*/\1/p' Package.swift | head -n 1)"
+[ -n "$MIN_MACOS" ] || { echo "cannot read the deployment target from Package.swift"; exit 1; }
+MLX_GEN="$SCRATCH/checkouts/mlx-swift/Source/Cmlx/mlx-generated/metal"
+[ -d "$MLX_GEN" ] || { echo "mlx-swift kernels not found: $MLX_GEN"; exit 1; }
+xcrun -sdk macosx --find metal >/dev/null 2>&1 && xcrun -sdk macosx --find metallib >/dev/null 2>&1 \
+  || { echo "Metal Toolchain missing: run 'xcodebuild -downloadComponent MetalToolchain'"; exit 1; }
+
+build_mlx_metallib() {
+  local gen="$1" out="$2" min_version="$3"
+  # Subshell: the cleanup trap stays local, the parent shell's trap table is untouched.
+  (
+    set -euo pipefail
+    local tmp k air=()
+    local kernels=(arg_reduce conv dot layer_norm random rms_norm rope
+                   scaled_dot_product_attention searchsorted steel/attn/kernels/steel_attention)
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/kikishima-metal.XXXXXX")"
+    trap 'rm -rf "$tmp"' EXIT
+    for k in "${kernels[@]}"; do
+      [ -f "$gen/$k.metal" ] || { echo "missing MLX kernel: $gen/$k.metal" >&2; exit 1; }
+      xcrun -sdk macosx metal -x metal -Wall -Wextra -fno-fast-math \
+        -Wno-c++17-extensions -Wno-c++20-extensions -Wmetal-addr-spaces \
+        -mmacosx-version-min="$min_version" -I "$gen" \
+        -c "$gen/$k.metal" -o "$tmp/$(basename "$k").air"
+      air+=("$tmp/$(basename "$k").air")
+    done
+    [ "${#air[@]}" -eq "${#kernels[@]}" ] || { echo "MLX air file count mismatch" >&2; exit 1; }
+    xcrun -sdk macosx metallib "${air[@]}" -o "$out"
+  )
+}
+build_mlx_metallib "$MLX_GEN" "$APP/Contents/MacOS/mlx.metallib" "$MIN_MACOS"
+echo "METALLIB: $APP/Contents/MacOS/mlx.metallib"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 if $SANDBOX; then
   PLIST="$APP/Contents/Info.plist"
