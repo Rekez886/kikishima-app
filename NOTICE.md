@@ -1,3 +1,5 @@
+Kikishima is Copyright (c) 2026 Lingjie Yang and released under the MIT License (see LICENSE).
+
 # Third-party notices
 
 ## AudioCap
