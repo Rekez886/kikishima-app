@@ -1,0 +1,961 @@
+# -*- coding: utf-8 -*-
+# 生成 zh-Hant / ja / en / ko 四张表。key = 简体中文源串。跑：python3 Resources/l10n/gen.py
+import sys
+from pathlib import Path
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools/lib'))
+from test_guard import require_free_space, install_exit_signals
+require_free_space(__file__)
+install_exit_signals()
+import json, os
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# 每条：简中 key → [繁中, 日, 英, 韩]
+T = {
+"显示选项：仅译文": ["僅譯文", "訳文のみ", "Translation", "번역만"],
+"显示选项：仅原文": ["僅原文", "原文のみ", "Source", "원문만 표시"],
+"未登录，字幕只显示原文；登录后继续翻译": ["未登入，字幕只顯示原文；登入後繼續翻譯", "未ログインのため原文のみ表示。ログイン後に翻訳を再開", "Not signed in. Captions show source text only.", "로그인하지 않아 원문만 표시됩니다. 로그인하면 번역이 재개됩니다."],
+
+"无": ["無", "なし", "None", "없음"],
+"无输出设备": ["無輸出裝置", "出力なし", "No output", "출력 없음"],
+"音频恢复中": ["音訊恢復中", "音声復旧中", "Audio recovering", "오디오 복구 중"],
+"切换中": ["切換中", "切替中", "Switching", "전환 중"],
+"开发令牌启用": ["開發權杖啟用", "開発トークン有効", "Dev token on", "개발 토큰 활성"],
+"缺录音权限": ["缺錄音權限", "録音未許可", "No access", "권한 없음"],
+"重连中": ["重連中", "再接続中", "Reconnecting", "재연결 중"],
+"请求过频": ["請求過頻", "リクエスト過多", "Rate limited", "요청 과다"],
+"无可存画面": ["無可存畫面", "保存画像なし", "No frame to save", "저장할 화면 없음"],
+"保存失败": ["儲存失敗", "保存失敗", "Save failed", "저장 실패"],
+"已保存": ["已儲存", "保存済み", "Saved", "저장 완료"],
+"设备已切换": ["裝置已切換", "出力切替済み", "Output switched", "출력 전환됨"],
+"收尾中": ["收尾中", "仕上げ中", "Finishing", "마무리 중"],
+"Pro 已开通": ["Pro 已開通", "Pro有効", "Pro activated", "Pro 활성화"],
+"需 Pro": ["需 Pro", "Pro必須", "Pro needed", "Pro 필요"],
+"字幕中断": ["字幕中斷", "字幕停止", "Stopped", "자막 중단"],
+"启动失败": ["啟動失敗", "起動失敗", "Start failed", "시작 실패"],
+"无法继续": ["無法繼續", "再開不可", "Start failed", "재개 불가"],
+"采音失败": ["收音失敗", "音声エラー", "Audio error", "오디오 오류"],
+"登录过期": ["登入過期", "認証切れ", "Expired", "로그인 만료"],
+"离线，正在重连": ["離線，正在重新連線", "オフライン、再接続中", "Offline, reconnecting", "오프라인, 다시 연결 중"],
+"修复": ["修復", "修復", "Fix", "수정"],
+"已复制": ["已複製", "コピーしました", "Copied", "복사됨"],
+"输出设备：%@": ["輸出裝置：%@", "出力デバイス：%@", "Output device: %@", "출력 장치: %@"],
+"切换输出设备，当前 %@": ["切換輸出裝置，目前 %@", "出力デバイスを変更、現在 %@", "Change output device, currently %@", "출력 장치 변경, 현재 %@"],
+"捕获范围：全部系统音频": ["擷取範圍：全部系統音訊", "収録対象：すべてのシステム音声", "Capturing: all system audio", "캡처 범위: 모든 시스템 오디오"],
+"先看到第一句真实译文": ["先看到第一句真實譯文", "まず実際の翻訳を確認しましょう", "See your first real translation", "첫 실제 번역 확인하기"],
+"开始后会播放测试语音，用系统音频识别并在线翻译。看到原文和译文后才能完成引导。": ["開始後會播放測試語音，透過系統音訊辨識並在線上翻譯。看到原文和譯文後才能完成引導。", "開始するとテスト音声を再生し、システム音声を認識してオンラインで翻訳します。原文と訳文を確認すると設定を完了できます。", "Starting plays test speech through system audio, then transcribes and translates it online. Setup finishes after real source text and a translation appear.", "시작하면 테스트 음성을 재생하고 시스템 오디오를 인식하여 온라인으로 번역합니다. 실제 원문과 번역이 표시되면 설정을 완료할 수 있습니다."],
+"真实字幕测试成功": ["真實字幕測試成功", "実際の字幕テストに成功しました", "Live caption test succeeded", "실제 자막 테스트 성공"],
+"未检测到测试语音。请播放当前会议语言的音频，检查输出设备和系统录音权限，再重试。": ["未偵測到測試語音。請播放目前會議語言的音訊，檢查輸出裝置和系統錄音權限，再重試。", "テスト音声を検出できませんでした。現在の会議言語の音声を再生し、出力デバイスとシステム録音の権限を確認して再試行してください。", "No test speech detected. Play audio in the current meeting language, check the output device and system recording permission, then retry.", "테스트 음성이 감지되지 않았습니다. 현재 회의 언어의 오디오를 재생하고 출력 장치와 시스템 녹음 권한을 확인한 후 다시 시도하세요."],
+"检查权限": ["檢查權限", "権限を確認", "Check permissions", "권한 확인"],
+"重播测试语音": ["重播測試語音", "テスト音声を再生", "Replay test speech", "테스트 음성 다시 재생"],
+"开始并播放测试语音": ["開始並播放測試語音", "開始してテスト音声を再生", "Start and play test speech", "시작하고 테스트 음성 재생"],
+"可以多选。首次只下载默认会议语言，其他语言在使用时下载。": ["可以多選。首次只下載預設會議語言，其他語言在使用時下載。", "複数選べます。最初は既定の会議言語のみをダウンロードし、他の言語は使用時にダウンロードします。", "Choose multiple languages. Initially, only the default meeting language downloads; others download when used.", "여러 언어를 선택할 수 있습니다. 처음에는 기본 회의 언어만 다운로드하고 다른 언어는 사용할 때 다운로드합니다."],
+"首次只预下载默认会议语言的转写模型。": ["首次只預先下載預設會議語言的轉寫模型。", "最初は既定の会議言語の文字起こしモデルのみを事前ダウンロードします。", "Initially, only the default meeting language’s transcription model downloads in advance.", "처음에는 기본 회의 언어의 음성 인식 모델만 미리 다운로드합니다."],
+"回看本场字幕": ["回看本場字幕", "今回の字幕を見返す", "Review this session", "이번 세션 자막 보기"],
+"回看已暂停更新，字幕仍在继续。重新打开可载入最新内容。": ["回看已暫停更新，字幕仍在繼續。重新開啟可載入最新內容。", "見返し中は表示を固定しています。字幕は継続中です。開き直すと最新の内容を表示します。", "This view is paused while live captions continue. Reopen it to load the latest content.", "이 화면은 업데이트가 멈춰 있지만 실시간 자막은 계속됩니다. 다시 열면 최신 내용을 볼 수 있습니다."],
+"搜索原文或译文": ["搜尋原文或譯文", "原文または訳文を検索", "Search source or translation", "원문 또는 번역 검색"],
+"复制双语字幕": ["複製雙語字幕", "原文と訳文をコピー", "Copy bilingual captions", "원문과 번역 복사"],
+"回到实时": ["回到即時", "リアルタイムに戻る", "Back to live", "실시간으로 돌아가기"],
+"译文尚未完成": ["譯文尚未完成", "翻訳が未完了です", "Translation not finished", "번역 미완료"],
+"记录列表": ["記錄列表", "記録リスト", "Record list", "기록 목록"],
+"双语": ["雙語", "二言語", "Bilingual", "이중 언어"],
+"仅桌面紧凑字幕生效，开启后无法点击工具条或拖动窗口。可在这里关闭；停止字幕也可用菜单栏或快捷键。": ["僅桌面緊湊字幕生效，開啟後無法點擊工具列或拖動視窗。可在這裡關閉；停止字幕也可用選單列或快捷鍵。", "デスクトップのコンパクト字幕のみ対象です。有効時はツールバー操作やウインドウ移動ができません。ここで解除できます。字幕の停止にはメニューバーやショートカットも使えます。", "Applies only to compact desktop captions. While enabled, the toolbar and window dragging are unavailable. Turn it off here; use the menu bar or shortcut to stop captions.", "데스크탑 간결한 자막에만 적용됩니다. 켜면 도구 모음 클릭과 창 이동이 불가능합니다. 여기서 끌 수 있으며, 메뉴 막대나 단축키로 자막을 중지할 수 있습니다."],
+"已展开": ["已展開", "展開済み", "Expanded", "펼쳐짐"],
+"已收起": ["已收起", "折りたたみ済み", "Collapsed", "접힘"],
+"更多语言…": ["更多語言…", "その他の言語…", "More languages…", "다른 언어…"],
+"字幕预览 · 示例": ["字幕預覽 · 範例", "字幕プレビュー · サンプル", "Caption preview · Example", "자막 미리보기 · 예시"],
+"我们一起确认接下来的安排。": ["我們一起確認接下來的安排。", "次の予定を一緒に確認しましょう。", "Let's review the next steps together.", "다음 일정을 함께 확인해 봅시다."],
+"分钟": ["分鐘", "分", "min", "분"],
+"翻译已暂停": ["翻譯已暫停", "翻訳を一時停止中", "Translation paused", "번역 일시 정지됨"],
+"字幕设置": ["字幕設定", "字幕の設定", "Caption settings", "자막 설정"],
+"灵动岛": ["靈動島", "アイランド", "Island", "아일랜드"],
+"桌面窗口": ["桌面視窗", "ウインドウ", "Desktop window", "데스크탑 창"],
+"灵动岛贴在摄像头下方；桌面窗口可拖动、可改大小。": ["靈動島貼在攝影機下方；桌面視窗可拖曳、可改大小。", "アイランドはカメラの下に表示。デスクトップ ウインドウはドラッグとサイズ変更ができます。", "The island sits under the camera; the desktop window can be dragged and resized.", "아일랜드는 카메라 아래에 표시됩니다. 데스크탑 창은 드래그와 크기 조절이 가능합니다."],
+"字号 %@": ["字級 %@", "文字サイズ %@", "Size %@", "글자 크기 %@"],
+"字号": ["字級", "文字サイズ", "Size", "글자 크기"],
+"高度 %@": ["高度 %@", "高さ %@", "Height %@", "높이 %@"],
+"高度": ["高度", "高さ", "Height", "높이"],
+"宽度 %@%": ["寬度 %@%", "幅 %@%", "Width %@%", "너비 %@%"],
+"宽度": ["寬度", "幅", "Width", "너비"],
+"译文字号": ["譯文字級", "訳文サイズ", "Caption size", "자막 글자 크기"],
+"字幕窗宽度": ["字幕窗寬度", "字幕の幅", "Caption width", "자막 너비"],
+"无人说话后收回": ["無人說話後收回", "無音で戻す", "Collapse when silent", "무음이면 접기"],
+"小": ["小", "小", "Small", "소"],
+"大": ["大", "大", "Large", "대"],
+"窄": ["窄", "狭", "Narrow", "좁게"],
+"宽": ["寬", "広", "Wide", "넓게"],
+"低": ["低", "低", "Low", "낮게"],
+"高": ["高", "高", "High", "높게"],
+"关": ["關", "オフ", "Off", "끔"],
+"快": ["快", "速", "Fast", "빠름"],
+"慢": ["慢", "遅", "Slow", "느림"],
+"背景 %@%": ["背景 %@%", "背景 %@%", "Background %@%", "배경 %@%"],
+"字体": ["字型", "フォント", "Font", "글꼴"],
+"系统": ["系統", "システム", "System", "시스템"],
+"圆体": ["圓體", "丸ゴシック", "Rounded", "둥근체"],
+"衬线": ["襯線", "明朝", "Serif", "명조"],
+"等宽": ["等寬", "等幅", "Mono", "고정폭"],
+"无人说话 %@ 秒后收回胶囊": ["無人說話 %@ 秒後收回膠囊", "%@ 秒間無音でカプセルに戻す", "Collapse to capsule after %@ s of silence", "%@초간 무음이면 캡슐로 접기"],
+"无人说话时不收回": ["無人說話時不收回", "無音でも戻さない", "Stay open during silence", "무음에도 접지 않음"],
+"鼠标靠近时淡出，可点到后面的窗口": ["滑鼠靠近時淡出，可點到後面的視窗", "ポインタが近づくと薄くなり、後ろのウインドウをクリックできます", "Fade when the pointer is over it so you can click what's behind", "포인터가 가까이 오면 흐려져 뒤의 창을 클릭할 수 있음"],
+"重新启动以完成语言切换": ["重新啟動以完成語言切換", "言語の切り替えを完了するには再起動してください", "Restart to finish changing the language", "언어 변경을 완료하려면 다시 시작하세요"],
+"立即重新启动": ["立即重新啟動", "今すぐ再起動", "Restart Now", "지금 다시 시작"],
+"稍后": ["稍後", "あとで", "Later", "나중에"],
+"更新窗口等系统界面需要重新启动 Kikishima 才能切换语言。": ["更新視窗等系統介面需要重新啟動 Kikishima 才能切換語言。", "アップデート画面などのシステム画面で言語を切り替えるには、Kikishimaの再起動が必要です。", "Restart Kikishima to change the language used by system windows such as the updater.", "업데이트 창과 같은 시스템 화면의 언어를 변경하려면 Kikishima를 다시 시작해야 합니다."],
+"字幕运行中。为避免中断，更新窗口等系统界面会在下次启动 Kikishima 时切换语言。": ["字幕執行中。為避免中斷，更新視窗等系統介面會在下次啟動 Kikishima 時切換語言。", "字幕を実行中です。中断を避けるため、アップデート画面などのシステム画面は次回Kikishimaを起動したときに言語が切り替わります。", "Captions are running. To avoid interrupting them, system windows such as the updater will change language the next time Kikishima starts.", "자막이 실행 중입니다. 중단을 피하기 위해 업데이트 창과 같은 시스템 화면의 언어는 다음에 Kikishima를 시작할 때 변경됩니다."],
+" 本周剩余": [" 本週剩餘", " 今週の残り", " left this week", " 이번 주 남음"],
+"%@ 分钟": ["%@ 分鐘", "%@ 分", "%@ min", "%@분"],
+"1. 开会前在「语言」里选好会议语言和译文语言。": ["1. 開會前在「語言」裡選好會議語言和譯文語言。", "1. 会議の前に「言語」で会議の言語と字幕の言語を選びます。", "1. Before the meeting, pick the meeting language and caption language under Languages.", "1. 회의 전에 「언어」에서 회의 언어와 자막 언어를 선택하세요."],
+"2. 会议开始后，菜单栏点图标 → 开始字幕，或按 %@。": ["2. 會議開始後，點選單列圖示 → 開始字幕，或按 %@。", "2. 会議が始まったらメニューバーのアイコン → 字幕を開始、または %@。", "2. When the meeting starts, click the menu bar icon → Start captions, or press %@.", "2. 회의가 시작되면 메뉴 막대 아이콘 → 자막 시작, 또는 %@."],
+"4. 停止时记录自动保存到「文稿 › Kikishima」。": ["4. 停止時記錄自動儲存到「文件 › Kikishima」。", "4. 停止すると記録が「書類 › Kikishima」に自動保存されます。", "4. When you stop, the transcript is saved to Documents › Kikishima.", "4. 중지하면 기록이 「문서 › Kikishima」에 자동 저장됩니다."],
+"6 位验证码": ["6 位驗證碼", "6桁のコード", "6-digit code", "6자리 코드"],
+"Pro 档": ["Pro 方案", "Pro プラン", "Pro plan", "Pro 플랜"],
+"macOS 26 (Tahoe) 及以上，Apple Silicon。首次使用会下载一次 Apple 离线转写模型。": ["macOS 26 (Tahoe) 以上，Apple Silicon。首次使用會下載一次 Apple 離線轉寫模型。", "macOS 26 (Tahoe) 以降、Apple Silicon。初回にAppleのオフライン音声認識モデルを一度ダウンロードします。", "macOS 26 (Tahoe) or later, Apple Silicon. Apple's offline speech model is downloaded once on first use.", "macOS 26 (Tahoe) 이상, Apple Silicon. 처음 사용 시 Apple 오프라인 음성 모델을 한 번 다운로드합니다."],
+"macOS 会在 app 听声音之前先问一次。Kikishima 只在字幕运行时使用它们，音频和画面都不会离开你的 Mac。": ["macOS 會在 app 聽聲音之前先問一次。Kikishima 只在字幕運行時使用它們，音訊和畫面都不會離開你的 Mac。", "音声を聞く前にmacOSが確認します。Kikishimaは字幕の実行中だけ使用し、音声も画面もMacの外に出ません。", "macOS asks before an app can listen. Kikishima uses these only while captions run; audio and screen never leave your Mac.", "macOS는 앱이 소리를 듣기 전에 확인합니다. Kikishima는 자막 실행 중에만 사용하며 오디오와 화면은 Mac을 떠나지 않습니다."],
+"macOS 会在 app 听声音之前先问一次。Kikishima 只在字幕运行时使用它们，音频不会离开你的 Mac。": ["macOS 會在 app 聽聲音之前先問一次。Kikishima 只在字幕運行時使用它們，音訊不會離開你的 Mac。", "音声を聞く前にmacOSが確認します。Kikishimaは字幕の実行中だけ使用し、音声はMacの外に出ません。", "macOS asks before an app can listen. Kikishima uses these only while captions run; audio never leaves your Mac.", "macOS는 앱이 소리를 듣기 전에 확인합니다. Kikishima는 자막 실행 중에만 사용하며 오디오는 Mac을 떠나지 않습니다."],
+"上一步": ["上一步", "戻る", "Back", "이전"],
+"下一步": ["下一步", "次へ", "Next", "다음"],
+"之后随时可以在 系统设置 › 隐私与安全性 里更改。": ["之後隨時可以在 系統設定 › 隱私權與安全性 裡更改。", "あとから システム設定 › プライバシーとセキュリティ でいつでも変更できます。", "You can change any of these later in System Settings › Privacy & Security.", "나중에 시스템 설정 › 개인 정보 보호 및 보안에서 언제든지 변경할 수 있습니다."],
+"会议是日语或其他语言？在「进入 Kikishima」里改会议语言。人名、产品名总被翻错？把它们加进术语表。": ["會議是日語或其他語言？在「進入 Kikishima」裡改會議語言。人名、產品名總被翻錯？把它們加進術語表。", "会議が日本語以外の言語なら「Kikishimaを開く」で会議の言語を変更。人名や製品名が誤訳されるなら用語集に追加。", "Meeting in another language? Change it in Open Kikishima. Names always mistranslated? Add them to the glossary.", "회의가 다른 언어인가요? 「Kikishima 열기」에서 회의 언어를 바꾸세요. 이름이 계속 잘못 번역되면 용어집에 추가하세요."],
+"会议记录": ["會議記錄", "会議の記録", "Transcripts", "회의 기록"],
+"会议总结": ["會議摘要", "会議の要約", "Meeting summary", "회의 요약"],
+"概览": ["概覽", "概要", "Overview", "개요"],
+"当前状态": ["目前狀態", "現在の状況", "Current state", "현재 상태"],
+"自动生成会议要点": ["自動產生會議重點", "会議の要点を自動生成", "Generate meeting highlights automatically", "회의 요점 자동 생성"],
+"生成会议总结": ["產生會議摘要", "会議の要約を生成", "Generate meeting summaries", "회의 요약 생성"],
+"暂不使用": ["暫不使用", "今は使用しない", "Not now", "지금은 사용 안 함"],
+"我的会议称呼": ["會議中我的稱呼", "会議での自分の呼び名", "My names in meetings", "회의에서 사용하는 내 이름"],
+"每行一个称呼，最多 10 个。": ["每行一個稱呼，最多 10 個。", "1行に1つ、最大10個まで。", "One name per line, up to 10.", "한 줄에 하나씩, 최대 10개."],
+"只有会议中明确提到这些称呼的内容才会归到“与你相关”；没有名字的“你来做”暂时无法可靠判断。": ["只有會議中明確提到這些稱呼的內容才會歸到「與你相關」；沒有名字的「你來做」暫時無法可靠判斷。", "会議中にこれらの呼び名が明示された内容だけが「あなたに関連」に入ります。名前のない「これをお願い」は、現時点では確実に判定できません。", "Only content that explicitly mentions one of these names appears under “Related to you.” Requests like “You take this” without a name cannot be attributed reliably yet.", "회의 중 이러한 이름이 명확히 언급된 내용만 ‘나와 관련’에 표시됩니다. 이름 없이 ‘네가 해줘’라고 한 내용은 아직 확실하게 판단할 수 없습니다."],
+"正在整理会议要点…": ["正在整理會議重點…", "会議の要点を整理中…", "Organizing meeting highlights…", "회의 요점 정리 중…"],
+"总结暂时不可用": ["摘要暫時無法使用", "要約は一時的に利用できません", "Summary temporarily unavailable", "요약을 일시적으로 사용할 수 없음"],
+"有 %@ 份会议总结无法读取，可能已损坏。": ["有 %@ 份會議摘要無法讀取，可能已損壞。", "%@ 件の会議要約を読み取れません。破損している可能性があります。", "%@ meeting summaries could not be read and may be corrupted.", "회의 요약 %@개를 읽을 수 없습니다. 손상되었을 수 있습니다."],
+"打开原始记录": ["開啟原始記錄", "元の記録を開く", "Open original transcript", "원본 기록 열기"],
+"关键决定": ["重要決定", "決定事項", "Decisions", "주요 결정"],
+"待办事项": ["待辦事項", "アクション項目", "Action items", "할 일"],
+"与你相关": ["與你相關", "あなたに関連", "Related to you", "나와 관련"],
+"未决问题": ["未決問題", "未解決の質問", "Open questions", "미결 질문"],
+"来源 %@": ["來源 %@", "出典 %@", "Source %@", "출처 %@"],
+"总结已中断": ["摘要已中斷", "要約が中断されました", "Summary interrupted", "요약이 중단됨"],
+"尚未生成总结": ["尚未產生摘要", "まだ要約はありません", "No summary yet", "아직 요약 없음"],
+"原始会议记录仍可正常打开。": ["原始會議記錄仍可正常開啟。", "元の会議記録は引き続き開けます。", "The original transcript is still available.", "원본 회의 기록은 계속 열 수 있습니다."],
+"无法修改记录": ["無法修改記錄", "記録を変更できません", "Couldn’t update transcript", "기록을 수정할 수 없음"],
+"以下记录无法删除：\n%@": ["以下記錄無法刪除：\n%@", "次の記録を削除できませんでした：\n%@", "Couldn’t delete these transcripts:\n%@", "다음 기록을 삭제할 수 없습니다:\n%@"],
+"无法更改登录启动设置": ["無法更改登入啟動設定", "ログイン時の起動設定を変更できません", "Couldn’t change launch-at-login settings", "로그인 시 실행 설정을 변경할 수 없습니다"],
+"Kikishima 可以在会议中持续整理要点，并在停止字幕后生成最终总结。": ["Kikishima 可以在會議中持續整理重點，並在停止字幕後產生最終摘要。", "Kikishimaは会議中に要点を整理し続け、字幕を停止したあとに最終要約を作成できます。", "Kikishima can organize key points during a meeting and create a final summary when captions stop.", "Kikishima는 회의 중 핵심 내용을 정리하고 자막을 중지하면 최종 요약을 생성할 수 있습니다."],
+"音频不会上传。会议文字和你填写的称呼会发送到 Kikishima，并转交 OpenAI 生成总结；服务器不保存内容。关闭会议总结不会关闭本机会议记录。": ["音訊不會上傳。會議文字和你填寫的稱呼會傳送到 Kikishima，並轉交 OpenAI 產生摘要；伺服器不儲存內容。關閉會議摘要不會關閉本機會議記錄。", "音声はアップロードされません。会議のテキストと入力した呼び名はKikishimaからOpenAIへ送られ、要約に使われます。サーバーには内容を保存しません。要約をオフにしても、Mac上の会議記録は引き続き保存されます。", "Audio is not uploaded. Meeting text and the names you enter are sent through Kikishima to OpenAI to create summaries; the server does not store the content. Turning summaries off does not turn off local transcripts.", "오디오는 업로드되지 않습니다. 회의 텍스트와 입력한 이름은 Kikishima를 통해 OpenAI로 전송되어 요약 생성에 사용되며, 서버에는 내용이 저장되지 않습니다. 회의 요약을 꺼도 Mac의 회의 기록은 계속 저장됩니다."],
+"音频只在本机转写，从不上传。转写出的文字、前一句上下文、术语表和会议称呼会发送到 Kikishima 服务器，并转交 AI 模型服务用于翻译和生成会议总结；服务器不保存内容。会议记录与总结只存在你的 Mac 上。": ["音訊只在本機轉寫，從不上傳。轉寫出的文字、前一句上下文、術語表和會議稱呼會傳送到 Kikishima 伺服器，並轉交 AI 模型服務用於翻譯和產生會議摘要；伺服器不儲存內容。會議記錄與摘要只存在你的 Mac 上。", "音声はMac内で文字にし、アップロードしません。文字、直前の文脈、用語集、会議での呼び名はKikishimaのサーバーからAIモデルサービスへ送られ、翻訳と会議要約に使われます。サーバーには内容を保存しません。会議記録と要約はあなたのMacにだけ残ります。", "Audio is transcribed on your Mac and never uploaded. Text, recent context, glossary terms, and meeting names are sent through Kikishima to AI model services for translation and meeting summaries; the server does not store the content. Transcripts and summaries remain only on your Mac.", "오디오는 Mac에서만 문자로 변환되며 업로드되지 않습니다. 텍스트, 직전 문맥, 용어집, 회의에서 사용하는 이름은 Kikishima 서버를 통해 AI 모델 서비스로 전송되어 번역과 회의 요약에 사용되며, 서버에는 내용이 저장되지 않습니다. 회의 기록과 요약은 Mac에만 남습니다."],
+"会议语言": ["會議語言", "会議の言語", "Meeting language", "회의 언어"],
+"会议语言（转写）": ["會議語言（轉寫）", "会議の言語（音声認識）", "Meeting language (transcription)", "회의 언어 (음성 인식)"],
+"你最熟悉的语言是哪一个？": ["你最熟悉的語言是哪一個？", "いちばん得意な言語はどれですか？", "Which language are you most comfortable with?", "가장 익숙한 언어는 무엇인가요?"],
+"停止字幕": ["停止字幕", "字幕を停止", "Stop captions", "자막 중지"],
+"允许": ["允許", "許可", "Allow", "허용"],
+"先跳过": ["先跳過", "あとで", "Skip for now", "나중에"],
+"免费版": ["免費版", "無料プラン", "Free", "무료 플랜"],
+"免费版 · 本周剩余约 %@ 分钟": ["免費版 · 本週剩餘約 %@ 分鐘", "無料プラン · 今週の残り約 %@ 分", "Free · about %@ min left this week", "무료 플랜 · 이번 주 약 %@분 남음"],
+"免费版 · 每周 60 分钟": ["免費版 · 每週 60 分鐘", "無料プラン · 週60分", "Free · 60 min per week", "무료 플랜 · 주 60분"],
+"免费版每周 60 分钟，登录即用，不需要信用卡。": ["免費版每週 60 分鐘，登入即用，不需要信用卡。", "無料プランは週60分。ログインすればすぐ使えます。クレジットカード不要。", "Free plan: 60 minutes a week. Sign in and go, no credit card.", "무료 플랜은 주 60분. 로그인 후 바로 사용, 신용카드 불필요."],
+"免费版每周 60 分钟，登录即用；付费后同一邮箱自动升级 Pro。": ["免費版每週 60 分鐘，登入即用；付費後同一信箱自動升級 Pro。", "無料プランは週60分。ログインすればすぐ使えます。購入後は同じメールアドレスで自動的にProになります。", "Free plan: 60 minutes a week. After purchase, the same email is upgraded to Pro automatically.", "무료 플랜은 주 60분. 구매 후 같은 이메일로 자동 Pro 업그레이드."],
+"免费版：每周 60 分钟翻译字幕，付费后同一邮箱自动升级 Pro。": ["免費版：每週 60 分鐘翻譯字幕，付費後同一信箱自動升級 Pro。", "無料プラン：翻訳字幕は週60分。購入後は同じメールアドレスで自動的にProになります。", "Free plan: 60 minutes of translated captions a week. Purchase upgrades the same email to Pro automatically.", "무료 플랜: 주 60분 번역 자막. 구매 시 같은 이메일로 자동 Pro 업그레이드."],
+"几项权限": ["幾項權限", "いくつかの権限", "A few permissions", "몇 가지 권한"],
+"到期": ["到期", "有効期限", "Expires", "만료"],
+"刷新订阅状态": ["重新整理訂閱狀態", "契約状況を更新", "Refresh subscription", "구독 상태 새로고침"],
+"升级 Pro": ["升級 Pro", "Proにアップグレード", "Upgrade to Pro", "Pro로 업그레이드"],
+"去登录": ["去登入", "ログインへ", "Sign in", "로그인하기"],
+"双击左 ⌘": ["雙擊左 ⌘", "左⌘を2回押す", "Double-tap left ⌘", "왼쪽 ⌘ 두 번 누르기"],
+"发送中…": ["傳送中…", "送信中…", "Sending…", "전송 중…"],
+"发送验证码": ["傳送驗證碼", "コードを送信", "Send code", "인증 코드 보내기"],
+"取消": ["取消", "キャンセル", "Cancel", "취소"],
+"只看常用": ["只看常用", "よく使う言語のみ", "Common only", "자주 쓰는 언어만"],
+"可以多选。选好后会在后台下载对应的离线转写模型（每个几百 MB，只下一次）。": ["可以多選。選好後會在背景下載對應的離線轉寫模型（每個幾百 MB，只下一次）。", "複数選べます。選ぶとオフライン音声認識モデルをバックグラウンドでダウンロードします（各数百MB、一度だけ）。", "Pick as many as you like. Offline speech models download in the background (a few hundred MB each, once).", "여러 개 선택 가능. 선택하면 오프라인 음성 모델을 백그라운드에서 다운로드합니다(각 수백 MB, 한 번만)."],
+"可以开会了": ["可以開會了", "準備完了", "You're ready", "준비 완료"],
+"可选": ["可選", "任意", "Optional", "선택"],
+"在 Dock 显示图标": ["在 Dock 顯示圖示", "Dockにアイコンを表示", "Show icon in Dock", "Dock에 아이콘 표시"],
+"在访达中显示": ["在 Finder 中顯示", "Finderで表示", "Show in Finder", "Finder에서 보기"],
+"场景": ["場景", "シーン", "Scene", "장면"],
+"复制原文": ["複製原文", "原文をコピー", "Copy source", "원문 복사"],
+"复制译文": ["複製譯文", "訳文をコピー", "Copy translation", "번역 복사"],
+"字幕位置": ["字幕位置", "字幕の位置", "Caption position", "자막 위치"],
+"字幕运行中不能换会议语言，先停止。": ["字幕運行中不能換會議語言，先停止。", "字幕の実行中は会議の言語を変更できません。先に停止してください。", "Stop captions before changing the meeting language.", "자막 실행 중에는 회의 언어를 바꿀 수 없습니다. 먼저 중지하세요."],
+"完成": ["完成", "完了", "Done", "완료"],
+"已允许": ["已允許", "許可済み", "Allowed", "허용됨"],
+"已授权「输入监控」，双击左 ⌘ 开关字幕。": ["已授權「輸入監控」，雙擊左 ⌘ 開關字幕。", "「入力監視」が許可されています。左⌘のダブルタップで字幕をオン/オフ。", "Input Monitoring granted. Double-tap left ⌘ to toggle captions.", "입력 모니터링 허용됨. 왼쪽 ⌘ 두 번으로 자막 켜기/끄기."],
+"已登录": ["已登入", "ログイン済み", "Signed in", "로그인됨"],
+"已登录：%@": ["已登入：%@", "ログイン済み：%@", "Signed in: %@", "로그인됨: %@"],
+"帮助": ["說明", "ヘルプ", "Help", "도움말"],
+"常用会议语言（已预下载模型）": ["常用會議語言（已預先下載模型）", "よく使う会議の言語（モデルを事前ダウンロード）", "Usual meeting languages (models predownloaded)", "자주 쓰는 회의 언어 (모델 사전 다운로드)"],
+"常规": ["一般", "一般", "General", "일반"],
+"开会时通常会听到哪些语言？": ["開會時通常會聽到哪些語言？", "会議ではどの言語がよく話されますか？", "Which languages do you usually hear in meetings?", "회의에서 주로 어떤 언어를 듣나요?"],
+"开会时：菜单栏点图标 → 开始字幕，或者 **%@**。字幕窗会浮在会议窗口上面，全屏也能看到。": ["開會時：點選單列圖示 → 開始字幕，或者 **%@**。字幕視窗會浮在會議視窗上面，全螢幕也能看到。", "会議中：メニューバーのアイコン → 字幕を開始、または **%@**。字幕は会議画面の上に浮き、フルスクリーンでも見えます。", "In a meeting: click the menu bar icon → Start captions, or **%@**. The caption window floats above the meeting, even in full screen.", "회의 중: 메뉴 막대 아이콘 → 자막 시작, 또는 **%@**. 자막 창은 회의 창 위에 떠 있으며 전체 화면에서도 보입니다."],
+"开发": ["開發", "開発", "Dev", "개발"],
+"开发者": ["開發者", "開発者", "Developer", "개발자"],
+"开始字幕": ["開始字幕", "字幕を開始", "Start captions", "자막 시작"],
+"当前判定：%@": ["目前判定：%@", "現在の判定：%@", "Detected: %@", "현재 판정: %@"],
+"当前生效：%@": ["目前生效：%@", "現在有効：%@", "Active: %@", "현재 적용: %@"],
+"必需": ["必需", "必須", "Required", "필수"],
+"快捷键": ["快速鍵", "ショートカット", "Shortcut", "단축키"],
+"快捷键 %@": ["快速鍵 %@", "ショートカット %@", "Shortcut %@", "단축키 %@"],
+"快捷键：%@": ["快速鍵：%@", "ショートカット：%@", "Shortcut: %@", "단축키: %@"],
+"怎么用": ["怎麼用", "使い方", "How it works", "사용 방법"],
+"打开": ["打開", "開く", "Open", "열기"],
+"打开文件夹": ["打開資料夾", "フォルダを開く", "Open folder", "폴더 열기"],
+"打开系统设置": ["打開系統設定", "システム設定を開く", "Open System Settings", "시스템 설정 열기"],
+"打开记录文件夹": ["打開記錄資料夾", "記録フォルダを開く", "Open transcripts folder", "기록 폴더 열기"],
+"换个邮箱": ["換個信箱", "別のメールアドレス", "Use another email", "다른 이메일"],
+"授予权限": ["授予權限", "権限を許可", "Grant permission", "권한 허용"],
+"搜索文件名": ["搜尋檔名", "ファイル名で検索", "Search file names", "파일 이름 검색"],
+"方式": ["方式", "方式", "Method", "방식"],
+"日语": ["日語", "日本語", "Japanese", "일본어"],
+"显示字幕窗": ["顯示字幕視窗", "字幕ウインドウを表示", "Show caption window", "자막 창 표시"],
+"最近记录": ["最近記錄", "最近の記録", "Recent transcripts", "최근 기록"],
+"服务器地址": ["伺服器位址", "サーバーアドレス", "Server URL", "서버 주소"],
+"未登录": ["未登入", "未ログイン", "Not signed in", "로그인 안 됨"],
+"未登录 · 点「进入 Kikishima」登录": ["未登入 · 點「進入 Kikishima」登入", "未ログイン · 「Kikishimaを開く」からログイン", "Not signed in · Open Kikishima to sign in", "로그인 안 됨 · 「Kikishima 열기」에서 로그인"],
+"档位": ["方案", "プラン", "Plan", "플랜"],
+"欢迎回来": ["歡迎回來", "おかえりなさい", "Welcome back", "다시 만나서 반가워요"],
+"每周 60 分钟。升级 Pro 不限时长。": ["每週 60 分鐘。升級 Pro 不限時長。", "週60分。Proなら時間無制限。", "60 minutes a week. Pro is unlimited.", "주 60분. Pro는 무제한."],
+"每行一条。纯词条 = 保留原文（人名、项目名）；「原词 → 译法」= 指定翻译。": ["每行一條。純詞條 = 保留原文（人名、專案名）；「原詞 → 譯法」= 指定翻譚。", "1行に1語。語だけ = 原文のまま（人名・製品名）。「原語 → 訳語」= 訳し方を指定。", "One entry per line. A bare term = keep as is (names, products). \"term → translation\" = translate exactly so.", "한 줄에 한 항목. 단어만 = 원문 유지(이름, 제품명). 「원어 → 번역」= 지정 번역."],
+"气泡模式（实验）": ["氣泡模式（實驗）", "吹き出しモード（実験的）", "Bubble mode (beta)", "말풍선 모드 (실험)"],
+"添加会议语言": ["新增會議語言", "会議の言語を追加", "Add meeting language", "회의 언어 추가"],
+"现在就试一下（开始字幕）": ["現在就試一下（開始字幕）", "今すぐ試す（字幕を開始）", "Try it now (start captions)", "지금 시도 (자막 시작)"],
+"界面和字幕译文都会用这个语言。之后随时能改。": ["介面和字幕譯文都會用這個語言。之後隨時能改。", "画面と字幕の訳文にこの言語を使います。あとで変更できます。", "The app and caption translations will use this language. You can change it anytime.", "앱 화면과 자막 번역에 이 언어를 사용합니다. 나중에 바꿀 수 있어요."],
+"界面和译文会立即切换。": ["介面會立即切換為所選語言；譯文語言同時生效。", "画面は選んだ言語にすぐ切り替わります。訳文の言語も同時に反映。", "The app switches to this language right away; caption translations too.", "앱 화면이 바로 이 언어로 바뀝니다. 자막 번역도 함께 적용."],
+"界面语言": ["介面語言", "表示言語", "App language", "앱 언어"],
+"登录": ["登入", "ログイン", "Sign in", "로그인"],
+"登录后每周 60 分钟免费翻译字幕。": ["登入後每週 60 分鐘免費翻譯字幕。", "ログインすると週60分の翻訳字幕が無料。", "Sign in for 60 free minutes of translated captions a week.", "로그인하면 주 60분 무료 번역 자막."],
+"系统要求": ["系統需求", "システム要件", "Requirements", "시스템 요구 사항"],
+"组合键": ["組合鍵", "キーの組み合わせ", "Key combo", "키 조합"],
+"给你参加的每一场线上会议加上实时翻译字幕。\nZoom、Google Meet、Teams，任何出声的应用都可以。": ["給你參加的每一場線上會議加上即時翻譯字幕。\nZoom、Google Meet、Teams，任何出聲的應用都可以。", "参加するすべてのオンライン会議にリアルタイム翻訳字幕を。\nZoom、Google Meet、Teams、音の出るアプリならなんでも。", "Live translated captions for every online meeting you join.\nZoom, Google Meet, Teams, anything that makes sound.", "참여하는 모든 온라인 회의에 실시간 번역 자막을.\nZoom, Google Meet, Teams, 소리가 나는 앱이면 무엇이든."],
+"英语": ["英語", "英語", "English", "영어"],
+"被拒绝过：请在系统设置里打开，回来会自动刷新。": ["被拒絕過：請在系統設定裡打開，回來會自動重新整理。", "以前に拒否されています。システム設定でオンにすると、戻ったときに自動で更新されます。", "Previously denied. Turn it on in System Settings; this refreshes when you come back.", "이전에 거부됨. 시스템 설정에서 켜면 돌아올 때 자동으로 새로고침됩니다."],
+"视频": ["影片", "動画", "Video", "동영상"],
+"译文字号 %@": ["譯文字級 %@", "訳文の文字サイズ %@", "Caption size %@", "자막 글자 크기 %@"],
+"译文语言": ["譯文語言", "字幕の言語", "Caption language", "자막 언어"],
+"语言": ["語言", "言語", "Languages", "언어"],
+"请按下组合键…": ["請按下組合鍵…", "キーを押してください…", "Press a key combo…", "키 조합을 누르세요…"],
+"账号": ["帳號", "アカウント", "Account", "계정"],
+"还没有会议记录。停止字幕时会自动保存到「文稿 › Kikishima」。": ["還沒有會議記錄。停止字幕時會自動儲存到「文件 › Kikishima」。", "会議の記録はまだありません。字幕を停止すると「書類 › Kikishima」に自動保存されます。", "No transcripts yet. They're saved to Documents › Kikishima when you stop captions.", "아직 회의 기록이 없습니다. 자막을 중지하면 「문서 › Kikishima」에 자동 저장됩니다."],
+"还没登录，登录后才能开始翻译。": ["還沒登入，登入後才能開始翻譚。", "まだログインしていません。ログインすると翻訳を開始できます。", "Not signed in yet. Sign in to start translating.", "아직 로그인하지 않았습니다. 로그인 후 번역을 시작할 수 있어요."],
+"还没选。开始字幕时会按需下载当前会议语言的模型。": ["還沒選。開始字幕時會按需下載目前會議語言的模型。", "未選択。字幕の開始時に現在の会議言語のモデルを必要に応じてダウンロードします。", "None yet. The current meeting language's model downloads on demand when captions start.", "아직 선택 안 함. 자막 시작 시 현재 회의 언어 모델을 필요할 때 다운로드합니다."],
+"进入 Kikishima": ["進入 Kikishima", "Kikishimaを開く", "Open Kikishima", "Kikishima 열기"],
+"退出": ["結束", "終了", "Quit", "종료"],
+"退出登录": ["登出", "ログアウト", "Sign out", "로그아웃"],
+"邮箱": ["信箱", "メールアドレス", "Email", "이메일"],
+"重新发送": ["重新傳送", "再送信", "Resend", "다시 보내기"],
+"隐私": ["隱私", "プライバシー", "Privacy", "개인 정보"],
+"需含 ⌃ ⌥ ⇧ ⌘ 中至少一个": ["需含 ⌃ ⌥ ⇧ ⌘ 中至少一個", "⌃ ⌥ ⇧ ⌘ のいずれかを含めてください", "Must include at least one of ⌃ ⌥ ⇧ ⌘", "⌃ ⌥ ⇧ ⌘ 중 하나 이상 포함"],
+"需要「输入监控」权限；未授权前用 %@。": ["需要「輸入監控」權限；未授權前用 %@。", "「入力監視」の権限が必要です。許可されるまでは %@ を使います。", "Needs Input Monitoring; until granted, %@ is used.", "입력 모니터링 권한이 필요합니다. 허용 전까지는 %@ 사용."],
+"音频只在本机转写，从不上传。转写出的文字、前一句上下文和你的术语表会发送到 Kikishima 服务器并转交 OpenAI 翻译，服务器不保存内容。会议记录保存在本机「文稿 › Kikishima」。": ["音訊只在本機轉寫，從不上傳。轉寫出的文字、前一句上下文和你的術語表會傳送到 Kikishima 伺服器並轉交 OpenAI 翻譯，伺服器不儲存內容。會議記錄儲存在本機「文件 › Kikishima」。", "音声はMac内で文字にし、アップロードしません。文字と直前の文、用語集だけがKikishimaのサーバーを経由してOpenAIで翻訳され、サーバーには保存されません。記録は「書類 › Kikishima」に保存。", "Audio is transcribed on your Mac and never uploaded. Only the text, the previous sentence and your glossary go through Kikishima's server to OpenAI for translation; nothing is stored. Transcripts stay in Documents › Kikishima.", "오디오는 Mac에서만 문자로 바뀌며 업로드되지 않습니다. 텍스트, 직전 문장, 용어집만 Kikishima 서버를 거쳐 OpenAI로 번역되며 저장되지 않습니다. 기록은 「문서 › Kikishima」에 저장."],
+"音频只在本机转写，从不上传。转写出的文字、前一句上下文和你的术语表会发送到 Kikishima 服务器并转交 OpenAI 翻译；服务器不保存内容。会议记录只存在你的 Mac 上。": ["音訊只在本機轉寫，從不上傳。轉寫出的文字、前一句上下文和你的術語表會傳送到 Kikishima 伺服器並轉交 OpenAI 翻譯；伺服器不儲存內容。會議記錄只存在你的 Mac 上。", "音声はMac内で文字にし、アップロードしません。文字と直前の文、用語集だけがKikishimaのサーバーを経由してOpenAIで翻訳され、サーバーには保存されません。記録はあなたのMacにだけ残ります。", "Audio is transcribed on your Mac and never uploaded. Only the text, the previous sentence and your glossary go through Kikishima's server to OpenAI; nothing is stored. Transcripts live only on your Mac.", "오디오는 Mac에서만 문자로 바뀌며 업로드되지 않습니다. 텍스트, 직전 문장, 용어집만 Kikishima 서버를 거쳐 OpenAI로 전달되며 저장되지 않습니다. 기록은 Mac에만 남습니다."],
+"音频只在本机转写，从不上传；只有转写出的文字会经 Kikishima 服务器发给 OpenAI 翻译。会议记录默认保存在「文稿 › Kikishima」。": ["音訊只在本機轉寫，從不上傳；只有轉寫出的文字會經 Kikishima 伺服器發給 OpenAI 翻譯。會議記錄預設儲存在「文件 › Kikishima」。", "音声はMac内で文字にし、アップロードしません。文字だけがKikishimaのサーバー経由でOpenAIに翻訳されます。記録は「書類 › Kikishima」に保存。", "Audio is transcribed on your Mac and never uploaded; only the text goes through Kikishima's server to OpenAI for translation. Transcripts are saved to Documents › Kikishima.", "오디오는 Mac에서만 문자로 바뀌며 업로드되지 않습니다. 텍스트만 Kikishima 서버를 거쳐 OpenAI로 번역됩니다. 기록은 「문서 › Kikishima」에 저장."],
+"验证中…": ["驗證中…", "確認中…", "Verifying…", "확인 중…"],
+"验证码已发到 %@，10 分钟内有效。": ["驗證碼已寄到 %@，10 分鐘內有效。", "%@ にコードを送りました。10分間有効です。", "Code sent to %@. Valid for 10 minutes.", "%@로 코드를 보냈습니다. 10분간 유효."],
+"高级": ["進階", "詳細", "Advanced", "고급"],
+"默认会议语言：%@": ["預設會議語言：%@", "既定の会議言語：%@", "Default meeting language: %@", "기본 회의 언어: %@"],
+"会议": ["會議", "会議", "Meeting", "회의"],
+"欢迎使用 Kikishima": ["歡迎使用 Kikishima", "Kikishimaへようこそ", "Welcome to Kikishima", "Kikishima에 오신 것을 환영합니다"],
+"字幕": ["字幕", "字幕", "Captions", "자막"],
+"记录": ["記錄", "記録", "History", "기록"],
+"术语表": ["術語表", "用語集", "Glossary", "용어집"],
+"设置": ["設定", "設定", "Settings", "설정"],
+"自动": ["自動", "自動", "Auto", "자동"],
+"麦克风被占用时判定为会议（字幕在上方），否则当作看视频（字幕在下方）。": ["麥克風被佔用時判定為會議（字幕在上方），否則當作看影片（字幕在下方）。", "マイク使用中は会議と判定（字幕は上）、それ以外は動画（字幕は下）。", "Mic in use = meeting (captions on top); otherwise video (captions at the bottom).", "마이크 사용 중이면 회의(자막 상단), 아니면 동영상(자막 하단)."],
+"字幕贴在屏幕顶部、摄像头正下方：读字幕时视线仍对着镜头。": ["字幕貼在螢幕頂部、鏡頭正下方：讀字幕時視線仍對著鏡頭。", "字幕は画面上部、カメラの真下に。読んでいても視線はカメラに向いたまま。", "Captions sit at the top, right under the camera, so you keep eye contact while reading.", "자막이 화면 상단, 카메라 바로 아래에 표시되어 읽으면서도 시선이 카메라를 향합니다."],
+"字幕贴在屏幕底部，像普通视频字幕。": ["字幕貼在螢幕底部，像普通影片字幕。", "字幕は画面下部に、普通の動画字幕のように。", "Captions sit at the bottom, like regular video subtitles.", "자막이 화면 하단에 일반 동영상 자막처럼 표시됩니다."],
+}
+
+# 第二批：状态行 / 横幅 / 错误 / 权限行
+T.update({
+"API key 无效或已吊销 · 打开设置检查": ["API key 無效或已撤銷 · 打開設定檢查", "APIキーが無効か取り消されています。設定を確認してください", "API key invalid or revoked · check Settings", "API 키가 유효하지 않거나 취소됨 · 설정 확인"],
+"翻译服务暂时故障（%@），稍后自动恢复": ["翻譯服務暫時故障（%@），稍後自動恢復", "翻訳サービスの一時的な障害（%@）。しばらくすると自動で復旧します", "Translation service temporarily unavailable (%@), retrying automatically", "번역 서비스 일시 오류(%@), 잠시 후 자동 복구"],
+"翻译服务繁忙或额度不足，稍后再试": ["翻譯服務繁忙或額度不足，稍後再試", "翻訳サービスが混み合っているか、利用枠が不足しています。後でもう一度お試しください", "Translation service is busy or the allowance is exhausted. Try again later.", "번역 서비스가 혼잡하거나 사용 한도가 부족합니다. 잠시 후 다시 시도하세요."],
+"上一次启动还在收尾，稍等一秒再试": ["上一次啟動還在收尾，稍等一秒再試", "前回の起動処理が終わりかけです。1秒後にもう一度", "Previous start is still finishing, try again in a second", "이전 시작이 마무리 중입니다. 1초 후 다시 시도"],
+"上一次启动还在收尾，请稍后再试": ["上一次啟動還在收尾，請稍後再試", "前回の起動処理が終わるまで待ってからもう一度", "Previous start is still finishing. Try again in a moment.", "이전 시작이 마무리될 때까지 기다렸다가 다시 시도하세요"],
+"下载转写模型 %@%": ["下載轉寫模型 %@%", "音声認識モデルをダウンロード中 %@%", "Downloading speech model %@%", "음성 모델 다운로드 중 %@%"],
+"今天从这个网络注册的账号太多了，明天再试": ["今天從這個網路註冊的帳號太多了，明天再試", "このネットワークからの本日の登録数が上限です。明日もう一度", "Too many sign-ups from this network today, try tomorrow", "오늘 이 네트워크에서 가입이 너무 많습니다. 내일 다시 시도"],
+"今日免费额度已用完": ["今日免費額度已用完", "本日の無料枠を使い切りました", "Today's free allowance is used up", "오늘의 무료 한도를 모두 사용했습니다"],
+"今日免费额度已被用完，明天再来，或升级 Pro 不受影响": ["今日免費額度已被用完，明天再來，或升級 Pro 不受影響", "本日の無料枠は使い切られました。明日また、またはProなら制限なし", "Today's free pool is exhausted. Come back tomorrow, or upgrade to Pro (unaffected)", "오늘의 무료 한도가 소진되었습니다. 내일 다시 오거나 Pro로 업그레이드(영향 없음)"],
+"会议字幕记录": ["會議字幕記錄", "会議字幕の記録", "Meeting caption transcript", "회의 자막 기록"],
+"先登录账号，再激活授权码": ["先登入帳號，再啟用授權碼", "先にログインしてからライセンスキーを有効化してください", "Sign in first, then activate the license key", "먼저 로그인한 뒤 라이선스 키를 활성화하세요"],
+"免费额度今日用尽 · 仅转写": ["免費額度今日用盡 · 僅轉寫", "本日の無料枠終了 · 文字起こしのみ", "Free pool exhausted today · transcription only", "오늘 무료 한도 소진 · 전사만"],
+"只给「气泡模式」定位发言者用。现在不开也行。": ["只給「氣泡模式」定位發言者用。現在不開也行。", "「吹き出しモード」で発言者を見つけるためだけに使います。今は不要です。", "Only used by Bubble mode to locate the speaker. Not needed now.", "말풍선 모드에서 발언자를 찾을 때만 사용합니다. 지금은 필요 없어요."],
+"听到会议里对方的声音。这是唯一途径。": ["聽到會議裡對方的聲音。這是唯一途徑。", "会議の相手の声を聞くために。これが唯一の方法です。", "To hear the other people in your meeting. This is the only way.", "회의 상대의 소리를 듣기 위해. 유일한 방법입니다."],
+"启动中…": ["啟動中…", "起動中…", "Starting…", "시작 중…"],
+"启动失败：%@": ["啟動失敗：%@", "起動に失敗：%@", "Failed to start: %@", "시작 실패: %@"],
+"字幕运行中": ["字幕運行中", "字幕を表示中", "Captions running", "자막 실행 중"],
+"字幕运行中 · 本周剩余约 %@ 分钟": ["字幕運行中 · 本週剩餘約 %@ 分鐘", "字幕を表示中 · 今週の残り約 %@ 分", "Captions running · about %@ min left this week", "자막 실행 중 · 이번 주 약 %@분 남음"],
+"就绪": ["就緒", "準備完了", "Ready", "준비됨"],
+"屏幕录制": ["螢幕錄製", "画面収録", "Screen Recording", "화면 기록"],
+"已停止": ["已停止", "停止しました", "Stopped", "중지됨"],
+"已停止 · 记录保存失败: %@": ["已停止 · 記錘儲存失敗: %@", "停止 · 記録の保存に失敗: %@", "Stopped · failed to save transcript: %@", "중지됨 · 기록 저장 실패: %@"],
+"已停止 · 记录已存 %@": ["已停止 · 記錄已存 %@", "停止 · 記録を保存しました %@", "Stopped · transcript saved %@", "중지됨 · 기록 저장됨 %@"],
+"已登录 · 免费版（每周 60 分钟）": ["已登入 · 免費版（每週 60 分鐘）", "ログイン済み · 無料プラン（週60分）", "Signed in · Free (60 min/week)", "로그인됨 · 무료 플랜(주 60분)"],
+"已退出登录": ["已登出", "ログアウトしました", "Signed out", "로그아웃됨"],
+"已退出登录，字幕只显示原文；登录后继续翻译": ["已登出，字幕只顯示原文；登入後繼續翻譯", "ログアウトしました。字幕は原文のみ。ログインすると翻訳を再開", "Signed out. Captions show source only; sign in to resume translation", "로그아웃됨. 자막은 원문만 표시. 로그인하면 번역 재개"],
+"开发令牌已启用": ["開發令牌已啟用", "開発トークンを有効化", "Dev token enabled", "개발 토큰 활성화됨"],
+"开始": ["開始", "開始", "Started", "시작"],
+"快照已存 %@": ["快照已存 %@", "スナップショットを保存 %@", "Snapshot saved %@", "스냅샷 저장됨 %@"],
+"把声音转成文字，全程在本机完成。": ["把聲音轉成文字，全程在本機完成。", "音声を文字にします。すべてMac内で完了。", "Turns speech into text, entirely on this Mac.", "음성을 텍스트로 바꿉니다. 모두 이 Mac에서 처리."],
+"授权已到期，请续费": ["授權已到期，請續費", "ライセンスの期限が切れています。更新してください", "License expired, please renew", "라이선스가 만료되었습니다. 갱신하세요"],
+"授权码无效，检查有没有抄错": ["授權碼無效，檢查有沒有抄錯", "ライセンスキーが無効です。入力を確認してください", "Invalid license key, check for typos", "라이선스 키가 잘못되었습니다. 오타를 확인하세요"],
+"操作太频繁，稍等一下再试": ["操作太頻繁，稍等一下再試", "操作が多すぎます。少し待ってからもう一度", "Too many attempts, wait a moment", "너무 자주 시도했습니다. 잠시 후 다시 시도"],
+"无网络 · 字幕仅转写，恢复联网后自动继续翻译": ["無網路 · 字幕僅轉寫，恢復連線後自動繼續翻譯", "オフライン。字幕は文字起こしのみ、接続が戻ると翻訳を再開", "Offline · transcription only, translation resumes when back online", "오프라인 · 전사만 표시, 온라인 복귀 시 번역 재개"],
+"服务器没有返回会话": ["伺服器沒有回傳會話", "サーバーからセッションが返りませんでした", "Server returned no session", "서버가 세션을 반환하지 않았습니다"],
+"本周 60 分钟免费额度已用完，下周一重置": ["本週 60 分鐘免費額度已用完，下週一重設", "今週の無料60分を使い切りました。月曜にリセット", "This week's 60 free minutes are used up. Resets Monday", "이번 주 무료 60분을 모두 사용했습니다. 월요일에 초기화"],
+"本地转写 + AI 翻译的会议实时字幕": ["本機轉寫 + AI 翻譯的會議即時字幕", "ローカル音声認識 + AI翻訳の会議字幕", "Live meeting captions: on-device transcription + AI translation", "기기 내 전사 + AI 번역 실시간 회의 자막"],
+"本期翻译额度已用完": ["本期翻譯額度已用完", "今期の翻訳枠を使い切りました", "Translation quota for this period is used up", "이번 기간 번역 한도를 모두 사용했습니다"],
+"没有「系统录音」权限，听不到会议声音。系统设置 › 隐私与安全性 › 屏幕录制与系统录音 里允许 Kikishima。": ["沒有「系統錄音」權限，聽不到會議聲音。系統設定 › 隱私權與安全性 › 螢幕錄製與系統錄音 裡允許 Kikishima。", "「システム音声の収録」が許可されていないため会議の音が聞けません。システム設定 › プライバシーとセキュリティ › 画面収録とシステム音声の収録 でKikishimaを許可してください。", "No System Audio Recording permission, so meetings can't be heard. Allow Kikishima in System Settings › Privacy & Security › Screen & System Audio Recording.", "시스템 오디오 기록 권한이 없어 회의 소리를 들을 수 없습니다. 시스템 설정 › 개인 정보 보호 및 보안 › 화면 및 시스템 오디오 기록에서 Kikishima를 허용하세요."],
+"没有可存的帧（气泡模式开着且会议窗口在吗？）": ["沒有可存的幀（氣泡模式開著且會議視窗在嗎？）", "保存できるフレームがありません（吹き出しモードがオンで会議画面がありますか？）", "No frame to save (is Bubble mode on and a meeting window present?)", "저장할 프레임이 없습니다(말풍선 모드가 켜져 있고 회의 창이 있나요?)"],
+"登录凭证无效，重试一次": ["登入憑證無效，重試一次", "ログイン情報が無効です。もう一度", "Invalid sign-in token, try again", "로그인 토큰이 유효하지 않습니다. 다시 시도"],
+"登录后才能翻译（免费版每周 60 分钟）": ["登入後才能翻譯（免費版每週 60 分鐘）", "翻訳にはログインが必要です（無料プランは週60分）", "Sign in to translate (Free: 60 min/week)", "번역하려면 로그인하세요(무료: 주 60분)"],
+"登录已过期": ["登入已過期", "ログインの期限切れ", "Session expired", "세션 만료"],
+"登录已过期，请重新登录": ["登入已過期，請重新登入", "ログインの期限が切れました。再ログインしてください", "Session expired, please sign in again", "세션이 만료되었습니다. 다시 로그인하세요"],
+"登录已过期，重新登录后继续翻译": ["登入已過期，重新登入後繼續翻譯", "ログインの期限が切れました。再ログインで翻訳を再開", "Session expired. Sign in again to resume translation", "세션 만료. 다시 로그인하면 번역 재개"],
+"系统音频录制": ["系統音訊錄製", "システム音声の収録", "System Audio Recording", "시스템 오디오 기록"],
+"网络不稳，字幕先只显示原文，恢复后自动补翻": ["網路不穩，字幕先只顯示原文，恢復後自動補翻", "接続が不安定です。字幕は原文のみ表示、復旧後に自動で翻訳を補います", "Unstable network. Showing source only; translations fill in when it recovers", "네트워크 불안정. 원문만 표시, 복구 후 자동 보완"],
+"网络错误：%@": ["網路錯誤：%@", "ネットワークエラー：%@", "Network error: %@", "네트워크 오류: %@"],
+"翻译API错误 %@": ["翻譯 API 錯誤 %@", "翻訳APIエラー %@", "Translation API error %@", "번역 API 오류 %@"],
+"翻译失败：%@": ["翻譯失敗：%@", "翻訳に失敗：%@", "Translation failed: %@", "번역 실패: %@"],
+"翻译服务错误 %@": ["翻譯服務錯誤 %@", "翻訳サービスエラー %@", "Translation service error %@", "번역 서비스 오류 %@"],
+"翻译服务错误 %@，稍后自动重试": ["翻譯服務錯誤 %@，稍後自動重試", "翻訳サービスエラー %@。しばらくして自動で再試行", "Translation service error %@, retrying shortly", "번역 서비스 오류 %@, 곧 자동 재시도"],
+"翻译请求超时": ["翻譯請求逾時", "翻訳リクエストがタイムアウト", "Translation request timed out", "번역 요청 시간 초과"],
+"识别「双击左 ⌘」这个快捷键。不给的话用 %@。": ["識別「雙擊左 ⌘」這個快速鍵。不給的話用 %@。", "「左⌘のダブルタップ」を認識するため。許可しない場合は %@ を使います。", "Detects the double-tap left ⌘ shortcut. Without it, %@ is used.", "왼쪽 ⌘ 두 번 누르기 단축키를 인식합니다. 허용하지 않으면 %@ 사용."],
+"试错次数太多，重新发一个验证码": ["試錯次數太多，重新發一個驗證碼", "試行回数が上限です。コードを再送してください", "Too many attempts, request a new code", "시도 횟수 초과. 새 코드를 요청하세요"],
+"语音识别": ["語音辨識", "音声認識", "Speech Recognition", "음성 인식"],
+"请求太频繁，稍等片刻": ["請求太頻繁，稍等片刻", "リクエストが多すぎます。少しお待ちください", "Too many requests, hold on a moment", "요청이 너무 많습니다. 잠시 기다려 주세요"],
+"转写中断": ["轉寫中斷", "音声認識が中断", "Transcription interrupted", "전사 중단"],
+"转写引擎中断：%@": ["轉寫引擎中斷：%@", "音声認識エンジンが中断：%@", "Speech engine interrupted: %@", "음성 엔진 중단: %@"],
+"转写引擎反复中断：%@": ["轉寫引擎反覆中斷：%@", "音声認識エンジンが繰り返し中断：%@", "Speech engine keeps failing: %@", "음성 엔진이 반복 중단: %@"],
+"转写重连中…": ["轉寫重連中…", "音声認識を再接続中…", "Reconnecting speech engine…", "음성 엔진 재연결 중…"],
+"输入监控": ["輸入監控", "入力監視", "Input Monitoring", "입력 모니터링"],
+"输出设备切换后无法继续捕获音频：%@": ["輸出裝置切換後無法繼續擷取音訊：%@", "出力デバイス切り替え後に音声を取得できません：%@", "Couldn't capture audio after the output device changed: %@", "출력 장치 변경 후 오디오를 캡처할 수 없습니다: %@"],
+"输出设备已切换，继续字幕": ["輸出裝置已切換，繼續字幕", "出力デバイスを切り替えました。字幕を継続", "Output device changed, captions continue", "출력 장치 변경됨, 자막 계속"],
+"这个授权码激活的设备已达上限": ["這個授權碼啟用的裝置已達上限", "このライセンスキーの端末数が上限です", "This license key has reached its device limit", "이 라이선스 키의 기기 수가 한도에 도달했습니다"],
+"这个账号没有可用的邮箱，换个方式登录": ["這個帳號沒有可用的信箱，換個方式登入", "このアカウントに使えるメールアドレスがありません。別の方法でログイン", "No usable email on this account, try another sign-in method", "이 계정에 사용할 이메일이 없습니다. 다른 방법으로 로그인"],
+"连不上服务器：%@": ["連不上伺服器：%@", "サーバーに接続できません：%@", "Can't reach the server: %@", "서버에 연결할 수 없습니다: %@"],
+"邮件服务暂不可用，稍后再试": ["郵件服務暫不可用，稍後再試", "メールサービスが一時的に利用できません。後でもう一度", "Email service temporarily unavailable, try later", "이메일 서비스를 일시적으로 사용할 수 없습니다. 나중에 다시 시도"],
+"邮箱格式不对": ["信箱格式不對", "メールアドレスの形式が正しくありません", "That doesn't look like an email address", "이메일 형식이 올바르지 않습니다"],
+"重试": ["重試", "再試行", "Retry", "다시 시도"],
+"需要订阅 Pro": ["需要訂閱 Pro", "Proの契約が必要です", "Pro subscription required", "Pro 구독이 필요합니다"],
+"需要订阅 Pro 才能继续翻译": ["需要訂閱 Pro 才能繼續翻譯", "翻訳を続けるにはProの契約が必要です", "A Pro subscription is required to keep translating", "번역을 계속하려면 Pro 구독이 필요합니다"],
+"音频仍无法捕获：%@": ["音訊仍無法擷取：%@", "音声をまだ取得できません：%@", "Still can't capture audio: %@", "여전히 오디오를 캡처할 수 없습니다: %@"],
+"音频已恢复": ["音訊已恢復", "音声が復旧しました", "Audio restored", "오디오 복구됨"],
+"音频设备切换失败，已停止": ["音訊裝置切換失敗，已停止", "音声デバイスの切り替えに失敗。停止しました", "Audio device switch failed, stopped", "오디오 장치 전환 실패, 중지됨"],
+"额度已用完 · 仅转写": ["額度已用完 · 僅轉寫", "翻訳枠を使い切りました · 文字起こしのみ", "Quota used up · transcription only", "한도 소진 · 전사만"],
+"验证码不对": ["驗證碼不對", "コードが違います", "Wrong code", "코드가 틀렸습니다"],
+"验证码已过期，重新发一个": ["驗證碼已過期，重新發一個", "コードの期限が切れました。再送してください", "Code expired, request a new one", "코드가 만료되었습니다. 새로 요청하세요"],
+"验证码邮件发送失败，稍后再试": ["驗證碼郵件寄送失敗，稍後再試", "コードのメール送信に失敗。後でもう一度", "Failed to send the code email, try later", "코드 이메일 전송 실패. 나중에 다시 시도"],
+})
+
+T["未知错误"] = ["未知錯誤", "不明なエラー", "unknown error", "알 수 없는 오류"]
+
+T.update({
+"更新": ["更新", "アップデート", "Updates", "업데이트"],
+"自动检查更新": ["自動檢查更新", "自動でアップデートを確認", "Check for updates automatically", "자동으로 업데이트 확인"],
+"检查更新…": ["檢查更新…", "アップデートを確認…", "Check for updates…", "업데이트 확인…"],
+"上次检查：%@": ["上次檢查：%@", "前回の確認：%@", "Last checked: %@", "마지막 확인: %@"],
+"当前版本 %@": ["目前版本 %@", "現在のバージョン %@", "Current version %@", "현재 버전 %@"],
+"把 Kikishima 拖进「%@」列表": ["把 Kikishima 拖進「%@」列表", "Kikishimaを「%@」のリストにドラッグ", "Drag Kikishima into the \"%@\" list", "Kikishima를 「%@」 목록으로 드래그"],
+"也可以点列表下方的 + 号，在 应用程序 里选 Kikishima。": ["也可以點列表下方的 + 號，在 應用程式 裡選 Kikishima。", "リスト下の＋ボタンから アプリケーション 内のKikishimaを選んでもOK。", "Or click + below the list and pick Kikishima from Applications.", "또는 목록 아래 + 버튼을 눌러 응용 프로그램에서 Kikishima를 선택하세요."],
+"屏幕录制与系统录音": ["螢幕錄製與系統錄音", "画面収録とシステム音声の収録", "Screen & System Audio Recording", "화면 및 시스템 오디오 기록"],
+"隐私与安全性": ["隱私權與安全性", "プライバシーとセキュリティ", "Privacy & Security", "개인 정보 보호 및 보안"],
+})
+
+T.update({
+"使用 Google 登录": ["使用 Google 登入", "Googleでログイン", "Sign in with Google", "Google로 로그인"],
+"使用邮箱登录": ["使用電子郵件登入", "メールでログイン", "Sign in with Email", "이메일로 로그인"],
+"或者用邮箱验证码": ["或者用信箱驗證碼", "またはメールのコードで", "or use an email code", "또는 이메일 코드 사용"],
+"Google 登录尚未配置": ["Google 登入尚未設定", "Googleログインは未設定です", "Google sign-in is not configured", "Google 로그인이 설정되지 않았습니다"],
+"已在浏览器打开 Google 登录…": ["已在瀏覽器打開 Google 登入…", "ブラウザでGoogleログインを開きました…", "Opened Google sign-in in your browser…", "브라우저에서 Google 로그인을 열었습니다…"],
+"无法在本机开启回环端口": ["無法在本機開啟回環連接埠", "ローカルのポートを開けませんでした", "Couldn't open a local callback port", "로컬 콜백 포트를 열 수 없습니다"],
+"浏览器回调无效": ["瀏覽器回呼無效", "ブラウザからの応答が無効です", "Invalid browser callback", "잘못된 브라우저 콜백"],
+"换取令牌失败：%@": ["換取權杖失敗：%@", "トークンの取得に失敗：%@", "Token exchange failed: %@", "토큰 교환 실패: %@"],
+"已取消": ["已取消", "キャンセルしました", "Cancelled", "취소됨"],
+"登录成功，可以关闭这个页面回到 app。": ["登入成功，可以關閉這個頁面回到 app。", "ログインしました。このページを閉じてアプリに戻ってください。", "Signed in. You can close this page and return to the app.", "로그인 완료. 이 페이지를 닫고 앱으로 돌아가세요."],
+"登录失败，请回到 app 重试。": ["登入失敗，請回到 app 重試。", "ログインに失敗しました。アプリに戻ってもう一度お試しください。", "Sign-in failed. Go back to the app and try again.", "로그인 실패. 앱으로 돌아가 다시 시도하세요."],
+})
+
+T.update({
+"通过 Apple 登录": ["透過 Apple 登入", "Appleでサインイン", "Sign in with Apple", "Apple로 로그인"],
+"Apple 登录尚未配置": ["Apple 登入尚未設定", "Appleでサインインは未設定です", "Sign in with Apple is not configured", "Apple 로그인이 설정되지 않았습니다"],
+"Apple 没有返回身份令牌": ["Apple 沒有回傳身分權杖", "Appleから身元トークンが返りませんでした", "Apple did not return an identity token", "Apple이 ID 토큰을 반환하지 않았습니다"],
+})
+
+T.update({
+"已在浏览器打开 Apple 登录…": ["已在瀏覽器打開 Apple 登入…", "ブラウザでAppleでサインインを開きました…", "Opened Sign in with Apple in your browser…", "브라우저에서 Apple 로그인을 열었습니다…"],
+})
+
+T.update({
+"自动下载并在下次启动时安装": ["自動下載並在下次啟動時安裝", "自動でダウンロードし、次回起動時にインストール", "Download automatically and install on next launch", "자동 다운로드 후 다음 실행 시 설치"],
+})
+
+T.update({
+"启动时显示主窗口": ["啟動時顯示主視窗", "起動時にメインウインドウを表示", "Show main window at launch", "실행 시 메인 창 표시"],
+})
+
+T.update({
+"紧凑字幕": ["緊湊字幕", "コンパクト字幕", "Compact captions", "간결한 자막"],
+"紧凑字幕（只显示最近两句译文）": ["緊湊字幕（只顯示最近兩句譯文）", "コンパクト字幕（直近2文の訳文のみ）", "Compact captions (last two translated lines only)", "간결한 자막 (최근 두 문장 번역만)"],
+})
+T["麦克风被占用时判定为会议（字幕在上方），否则当作看视频（字幕贴在发声窗口底部）。"] = ["麥克風被佔用時判定為會議（字幕在上方），否則當作看影片（字幕貼在發聲視窗底部）。", "マイク使用中は会議と判定（字幕は上）、それ以外は動画（音の出ているウインドウの下部に字幕）。", "Mic in use = meeting (captions on top); otherwise video (captions at the bottom of the window playing audio).", "마이크 사용 중이면 회의(자막 상단), 아니면 동영상(소리 나는 창 하단에 자막)."]
+T["字幕贴在正在发声的窗口底部，像视频自带字幕。"] = ["字幕貼在正在發聲的視窗底部，像影片自帶字幕。", "音の出ているウインドウの下部に字幕を表示。動画の字幕のように。", "Captions sit at the bottom of the window playing audio, like built-in subtitles.", "소리 나는 창 하단에 자막이 표시됩니다. 동영상 자막처럼."]
+
+T.update({
+"%@ / 80 条 · %@ / 4000 字": ["%@ / 80 條 · %@ / 4000 字", "%@ / 80 件 · %@ / 4000 文字", "%@ / 80 entries · %@ / 4000 chars", "%@ / 80개 · %@ / 4000자"],
+"登录时自动启动": ["登入時自動啟動", "ログイン時に自動起動", "Launch at login", "로그인 시 자동 실행"],
+"20 秒没听到声音：检查会议是否在播放、输出设备是否正确": ["20 秒沒聽到聲音：檢查會議是否在播放、輸出裝置是否正確", "20秒間音がありません。会議の音が出ているか、出力デバイスが正しいか確認してください", "No sound for 20 s: check the meeting is playing and the output device is right", "20초간 소리가 없습니다. 회의 소리가 나오는지, 출력 장치가 맞는지 확인하세요"],
+})
+
+# ---- 第二轮审计后新增（2026-08-30 深夜）----
+T.update({
+"已登录 · Pro": ["已登入 · Pro", "ログイン済み · Pro", "Signed in · Pro", "로그인됨 · Pro"],
+"失败：%@": ["失敗：%@", "失敗：%@", "Failed: %@", "실패: %@"],
+"显示全部 %@ 种": ["顯示全部 %@ 種", "すべて表示（%@言語）", "Show all %@", "전체 %@개 보기"],
+"（首次使用：正在下载转写模型…）": ["（首次使用：正在下載轉寫模型…）", "（初回のみ：文字起こしモデルをダウンロード中…）", "(First run: downloading the transcription model…)", "(첫 실행: 음성 인식 모델 다운로드 중…)"],
+"转写流中断：%@": ["轉寫串流中斷：%@", "文字起こしが中断：%@", "Transcription stream interrupted: %@", "음성 인식 스트림 중단: %@"],
+"读默认输出设备失败：%@": ["讀取預設輸出裝置失敗：%@", "デフォルト出力デバイスの取得に失敗：%@", "Couldn't read the default output device: %@", "기본 출력 장치를 읽을 수 없음: %@"],
+"读设备 UID 失败：%@": ["讀取裝置 UID 失敗：%@", "デバイスUIDの取得に失敗：%@", "Couldn't read the device UID: %@", "장치 UID를 읽을 수 없음: %@"],
+"读 tap 音频格式失败：%@": ["讀取 tap 音訊格式失敗：%@", "tapの音声フォーマット取得に失敗：%@", "Couldn't read the tap audio format: %@", "tap 오디오 형식을 읽을 수 없음: %@"],
+"无法捕获系统音频（错误 %@）。可能还没允许「系统录音」权限。": ["無法擷取系統音訊（錯誤 %@）。可能還沒允許「系統錄音」權限。", "システム音声を取得できません（エラー%@）。「システム録音」の権限がまだ許可されていない可能性があります。", "Couldn't capture system audio (error %@). The System Audio Recording permission may not be granted yet.", "시스템 오디오를 캡처할 수 없습니다(오류 %@). 시스템 오디오 녹음 권한이 아직 허용되지 않았을 수 있습니다."],
+"%@失败：%@": ["%@失敗：%@", "%@に失敗：%@", "%@ failed: %@", "%@ 실패: %@"],
+"创建聚合设备": ["建立聚合裝置", "集約デバイスの作成", "Creating the aggregate device", "집계 장치 생성"],
+"创建 IO proc": ["建立 IO proc", "IO procの作成", "Creating the IO proc", "IO proc 생성"],
+"启动聚合设备": ["啟動聚合裝置", "集約デバイスの開始", "Starting the aggregate device", "집계 장치 시작"],
+"本周免费额度已用完，%@ 重置": ["本週免費額度已用完，%@ 重設", "今週の無料枠を使い切りました。%@にリセット", "This week's free minutes are used up. Resets %@", "이번 주 무료 시간을 모두 사용했습니다. %@ 초기화"],
+"下周一": ["下週一", "来週月曜", "next Monday", "다음 주 월요일"],
+"免费版 · 本周剩余不足 1 分钟": ["免費版 · 本週剩餘不足 1 分鐘", "無料プラン · 今週の残りは1分未満", "Free · under 1 min left this week", "무료 플랜 · 이번 주 남은 시간 1분 미만"],
+"字幕运行中 · 本周剩余不足 1 分钟": ["字幕運行中 · 本週剩餘不足 1 分鐘", "字幕を表示中 · 今週の残りは1分未満", "Captions running · under 1 min left this week", "자막 실행 중 · 이번 주 남은 시간 1분 미만"],
+"Pro：$4.99/月 或 $39/年 · 7 天免费试用 · 随时取消": ["Pro：$4.99/月 或 $39/年 · 7 天免費試用 · 隨時取消", "Pro：月額$4.99 または 年額$39 · 7日間無料 · いつでも解約OK", "Pro: $4.99/mo or $39/yr · 7-day free trial · cancel anytime", "Pro: 월 $4.99 또는 연 $39 · 7일 무료 체험 · 언제든 해지"],
+"试用中 · 还剩 %@ 天": ["試用中 · 還剩 %@ 天", "トライアル中 · 残り%@日", "Trial · %@ days left", "체험 중 · %@일 남음"],
+"Pro（试用中）": ["Pro（試用中）", "Pro（トライアル中）", "Pro (trial)", "Pro(체험 중)"],
+"试用到": ["試用到", "トライアル終了日", "Trial ends", "체험 종료"],
+"请用与账号相同的邮箱付款，才能自动升级。": ["請用與帳號相同的信箱付款，才能自動升級。", "アカウントと同じメールアドレスで購入すると自動的にProになります。", "Pay with the same email as your account so the upgrade applies automatically.", "계정과 같은 이메일로 결제하면 자동으로 업그레이드됩니다."],
+"有邀请码？": ["有邀請碼？", "招待コードをお持ちですか？", "Have an invite code?", "초대 코드가 있나요?"],
+"兑换": ["兌換", "使う", "Redeem", "사용"],
+"邀请码无效": ["邀請碼無效", "招待コードが無効です", "Invalid invite code", "유효하지 않은 초대 코드"],
+"这个邀请码已经用完了": ["這個邀請碼已經用完了", "この招待コードは使用済みです", "This invite code has been used up", "이 초대 코드는 모두 사용되었습니다"],
+"邀请码已过期": ["邀請碼已過期", "招待コードの期限が切れています", "Invite code expired", "초대 코드가 만료되었습니다"],
+"邀请码已兑换，账号已升级 Pro": ["邀請碼已兌換，帳號已升級 Pro", "招待コードを適用しました。Proになりました", "Invite code redeemed: your account is now Pro", "초대 코드가 적용되어 Pro로 업그레이드되었습니다"],
+"这个授权码已经绑在别的账号上": ["這個授權碼已經綁在別的帳號上", "この認証コードは別のアカウントで使用済みです", "This license key is already linked to another account", "이 라이선스 키는 다른 계정에 연결되어 있습니다"],
+"服务器地址无效": ["伺服器地址無效", "サーバーアドレスが無効です", "Invalid server address", "서버 주소가 잘못되었습니다"],
+"登录超时，请重试": ["登入超時，請重試", "ログインがタイムアウトしました。もう一度お試しください", "Sign-in timed out. Try again", "로그인 시간이 초과되었습니다. 다시 시도하세요"],
+"登录后才能开始翻译字幕。": ["登入後才能開始翻譯字幕。", "字幕の翻訳を始めるにはログインが必要です。", "Sign in to start translated captions.", "번역 자막을 시작하려면 로그인하세요."],
+"打开 Kikishima": ["打開 Kikishima", "Kikishimaを開く", "Open Kikishima", "Kikishima 열기"],
+"设置…": ["設定…", "設定…", "Settings…", "설정…"],
+"隐藏字幕窗": ["隱藏字幕窗", "字幕ウインドウを隠す", "Hide caption window", "자막 창 숨기기"],
+"重置字幕位置": ["重設字幕位置", "字幕の位置をリセット", "Reset caption position", "자막 위치 재설정"],
+"字幕窗": ["字幕窗", "字幕ウインドウ", "Caption window", "자막 창"],
+"正在听…": ["正在聽…", "聞き取り中…", "Listening…", "듣는 중…"],
+"关闭": ["關閉", "閉じる", "Close", "닫기"],
+"Kikishima 字幕": ["Kikishima 字幕", "Kikishima 字幕", "Kikishima captions", "Kikishima 자막"],
+"复制全部译文": ["複製全部譯文", "訳文をすべてコピー", "Copy all translations", "번역 전체 복사"],
+"音频电平": ["音訊電平", "音量レベル", "Audio level", "오디오 레벨"],
+"没有输出设备": ["無輸出裝置", "出力機器なし", "No output device", "출력 장치 없음"],
+"音频中断，恢复中": ["音訊中斷，恢復中", "音声中断、復旧中", "Audio reconnecting", "오디오 복구 중"],
+"需要录音权限": ["需要錄音權限", "録音の許可が必要", "Recording blocked", "녹음 권한 필요"],
+"没有输出设备，听不到会议声音": ["沒有輸出裝置，聽不到會議聲音", "出力機器がなく、会議音声を聞けません", "No output device, so meeting audio cannot be heard", "출력 장치가 없어 회의 소리를 들을 수 없습니다"],
+"音频中断，正在恢复": ["音訊中斷，正在恢復", "音声が中断しました。復旧中です", "Audio interrupted, recovering", "오디오가 중단되어 복구 중입니다"],
+"未登录 · 点「打开 Kikishima」登录": ["未登入 · 點「打開 Kikishima」登入", "未ログイン · 「Kikishimaを開く」からログイン", "Not signed in · use Open Kikishima to sign in", "로그인 안 됨 · 「Kikishima 열기」에서 로그인"],
+"以后再说": ["以後再說", "あとで", "Later", "나중에"],
+"会议是日语或其他语言？在「打开 Kikishima」里改会议语言。人名、产品名总被翻错？把它们加进术语表。": ["會議是日語或其他語言？在「打開 Kikishima」裡改會議語言。人名、產品名總被翻錯？把它們加進術語表。", "会議が日本語や他の言語なら「Kikishimaを開く」で会議の言語を変更。人名や製品名の誤訳は用語集に追加。", "Meeting in Japanese or another language? Change it under Open Kikishima. Names keep getting mistranslated? Add them to the glossary.", "회의가 일본어나 다른 언어라면 「Kikishima 열기」에서 회의 언어를 바꾸세요. 이름이 계속 잘못 번역되면 용어집에 추가하세요."],
+"请在弹出的系统对话框里允许，回来会自动刷新。": ["請在彈出的系統對話框裡允許，回來會自動刷新。", "表示されたシステムのダイアログで許可してください。戻ると自動で更新されます。", "Allow it in the system dialog that just appeared; this refreshes when you come back.", "표시된 시스템 대화상자에서 허용하세요. 돌아오면 자동으로 새로 고쳐집니다."],
+"被拒绝": ["被拒絕", "拒否済み", "Denied", "거부됨"],
+"未允许": ["未允許", "未許可", "Not allowed yet", "미허용"],
+"还没有会议记录": ["還沒有會議記錄", "まだ会議の記録がありません", "No meeting transcripts yet", "아직 회의 기록이 없습니다"],
+"停止字幕时会自动保存到「文稿 › Kikishima」。": ["停止字幕時會自動儲存到「文稿 › Kikishima」。", "字幕を停止すると「書類 › Kikishima」に自動保存されます。", "Saved automatically to Documents › Kikishima when you stop captions.", "자막을 중지하면 「문서 › Kikishima」에 자동 저장됩니다."],
+"删除": ["刪除", "削除", "Delete", "삭제"],
+"删除所选": ["刪除所選項目", "選択項目を削除", "Delete Selected", "선택 항목 삭제"],
+"删除这条会议记录？": ["刪除這筆會議記錄？", "この会議記録を削除しますか？", "Delete this meeting transcript?", "이 회의 기록을 삭제할까요?"],
+"删除所选的 %@ 条会议记录？": ["刪除所選的 %@ 筆會議記錄？", "選択した %@ 件の会議記録を削除しますか？", "Delete the %@ selected meeting transcripts?", "선택한 회의 기록 %@개를 삭제할까요?"],
+"删除后会移到废纸篓，可以恢复。": ["刪除後會移到垃圾桶，之後仍可復原。", "削除するとゴミ箱に移動し、元に戻せます。", "It will be moved to the Trash, where it can be recovered.", "삭제하면 휴지통으로 이동하며 다시 복원할 수 있습니다."],
+"无法删除记录": ["無法刪除記錄", "記録を削除できません", "Couldn't Delete Transcript", "기록을 삭제할 수 없습니다"],
+"组合键注册失败（可能被其他 app 占用），换一个": ["組合鍵註冊失敗（可能被其他 app 佔用），換一個", "ショートカットを登録できません（他のアプリが使用中の可能性）。別のものにしてください", "Couldn't register the shortcut (another app may be using it); pick another", "단축키를 등록할 수 없습니다(다른 앱이 사용 중일 수 있음). 다른 조합을 선택하세요"],
+"允许兼容的共享方式捕获字幕窗": ["允許相容的共享方式擷取字幕視窗", "対応する共有方式で字幕ウインドウの取得を許可", "Allow compatible sharing methods to capture captions", "지원되는 공유 방식에서 자막 창 캡처 허용"],
+"关闭此项不能保证字幕不被共享或录屏。共享前请手动隐藏字幕，并在参会者设备上确认。": ["關閉此項不能保證字幕不被共享或錄影。共享前請手動隱藏字幕，並在與會者裝置上確認。", "オフにしても、共有や録画に字幕が映らない保証はありません。共有前に字幕を手動で隠し、参加者の端末で確認してください。", "Turning this off does not guarantee captions are excluded from sharing or recording. Hide captions manually before sharing and check on a participant’s device.", "이 옵션을 꺼도 공유나 녹화에서 자막이 숨겨진다고 보장할 수 없습니다. 공유 전에 자막을 직접 숨기고 참가자 기기에서 확인하세요."],
+"会议记录保存位置": ["會議記錄儲存位置", "会議記録の保存先", "Transcripts folder", "회의 기록 저장 위치"],
+"更改…": ["更改…", "変更…", "Change…", "변경…"],
+"选择": ["選擇", "選択", "Choose", "선택"],
+"选择会议记录文件夹": ["選擇會議記錄資料夾", "会議記録のフォルダを選択", "Choose the transcripts folder", "회의 기록 폴더 선택"],
+"按 Esc 取消": ["按 Esc 取消", "Escでキャンセル", "Press Esc to cancel", "Esc를 눌러 취소"],
+"这个组合被系统占用，换一个": ["這個組合被系統佔用，換一個", "この組み合わせはシステムが使用中です。別のものにしてください", "That shortcut is reserved by macOS; pick another", "이 조합은 시스템에서 사용 중입니다. 다른 조합을 선택하세요"],
+"只字幕你听到的声音；你自己说的话不会被记录。": ["只字幕你聽到的聲音；你自己說的話不會被記錄。", "聞こえた音声だけを字幕にします。あなた自身の発言は記録されません。", "Only what you hear gets captioned; your own voice is never recorded.", "들리는 소리만 자막으로 표시되며, 본인의 목소리는 기록되지 않습니다."],
+"本周剩余约 %@ 分钟": ["本週剩餘約 %@ 分鐘", "今週の残り約 %@ 分", "About %@ min left this week", "이번 주 약 %@분 남음"],
+"字幕长度": ["字幕長度", "字幕の長さ", "Caption length", "자막 길이"],
+"短": ["短", "短", "Short", "짧게"],
+"中": ["中", "中", "Medium", "보통"],
+"长": ["長", "長", "Long", "길게"],
+"更长 = 一句更完整、更连贯，但每句晚出 1～2 秒。": ["更長 = 一句更完整、更連貫，但每句晚出 1～2 秒。", "長いほど一文がまとまって読みやすくなりますが、表示が1～2秒遅れます。", "Longer = more complete, coherent sentences, but each line appears 1 to 2 seconds later.", "길수록 문장이 완전하고 자연스럽지만 각 줄이 1~2초 늦게 표시됩니다."],
+"暂停字幕": ["暫停字幕", "字幕を一時停止", "Pause captions", "자막 일시 정지"],
+"继续字幕": ["繼續字幕", "字幕を再開", "Resume captions", "자막 재개"],
+"已暂停": ["已暫停", "一時停止中", "Paused", "일시 정지"],
+"已暂停 · 声音不再记录": ["已暫停 · 聲音不再記錄", "一時停止中 · 音声は記録されません", "Paused · audio is not being captured", "일시 정지 · 오디오가 기록되지 않습니다"],
+"继续": ["繼續", "再開", "Resume", "재개"],
+"继续中…": ["繼續中…", "再開しています…", "Resuming…", "재개 중…"],
+"（暂停了 %@ 分钟）": ["（暫停了 %@ 分鐘）", "（%@分間の一時停止）", "(paused for %@ min)", "(%@분 일시 정지)"],
+"无法继续：%@": ["無法繼續：%@", "再開できません：%@", "Couldn't resume: %@", "재개할 수 없음: %@"],
+"继续失败，已停止": ["繼續失敗，已停止", "再開に失敗したため停止しました", "Resume failed, stopped", "재개 실패, 중지됨"],
+"搜索标题或内容": ["搜尋標題或內容", "タイトルや内容を検索", "Search titles or content", "제목 또는 내용 검색"],
+"重命名…": ["重新命名…", "名称を変更…", "Rename…", "이름 변경…"],
+"重命名记录": ["重新命名記錄", "記録の名称を変更", "Rename Transcript", "기록 이름 변경"],
+"好": ["好", "OK", "OK", "확인"],
+"这场会的词（回车添加到术语表）": ["這場會的詞（回車加到術語表）", "この会議の用語（Enterで用語集に追加）", "Terms for this meeting (Enter adds to glossary)", "이 회의 용어(Enter로 용어집에 추가)"],
+"背景不透明度 %@%": ["背景不透明度 %@%", "背景の不透明度 %@%", "Background opacity %@%", "배경 불투명도 %@%"],
+"紧凑字幕点击穿透（鼠标直接点到下面的窗口）": ["緊湊字幕點擊穿透（滑鼠直接點到下面的視窗）", "コンパクト字幕をクリック透過（下のウインドウを直接操作）", "Compact captions ignore clicks (mouse goes to the window below)", "간결한 자막 클릭 통과(아래 창을 바로 클릭)"],
+"开着就拖不动字幕窗；用菜单里的「重置字幕位置」或切换场景来摆位。": ["開著就拖不動字幕窗；用選單裡的「重設字幕位置」或切換場景來擺位。", "オンの間は字幕ウインドウをドラッグできません。メニューの「字幕の位置をリセット」やシーン切替で位置を決めてください。", "While on, the caption window can't be dragged; use Reset caption position or switch scenes to place it.", "켜져 있으면 자막 창을 드래그할 수 없습니다. 메뉴의 「자막 위치 재설정」이나 장면 전환으로 배치하세요."],
+"正在听：%@": ["正在聽：%@", "入力元：%@", "Listening to: %@", "듣는 중: %@"],
+"切换": ["切換", "切替", "Switch", "전환"],
+"需下载": ["需下載", "要ダウンロード", "needs download", "다운로드 필요"],
+"选了就下载模型（建议在 Wi-Fi 下）": ["選了就下載模型（建議在 Wi-Fi 下）", "選択したらすぐモデルをダウンロード（Wi-Fi推奨）", "Download models as soon as selected (Wi-Fi recommended)", "선택하면 바로 모델 다운로드(Wi-Fi 권장)"],
+"已选 %@ 种，每种几百 MB，只下一次。": ["已選 %@ 種，每種幾百 MB，只下一次。", "%@言語を選択中。各数百MB、ダウンロードは1回だけ。", "%@ selected, a few hundred MB each, downloaded once.", "%@개 선택, 각 수백 MB, 한 번만 다운로드."],
+"稍后下载：开始字幕时再按需下载当前会议语言的模型。": ["稍後下載：開始字幕時再按需下載當前會議語言的模型。", "あとでダウンロード：字幕開始時に必要な言語のモデルだけ取得します。", "Later: the model for the current meeting language downloads when you start captions.", "나중에: 자막 시작 시 현재 회의 언어의 모델만 다운로드합니다."],
+"有邀请码？在这里兑换": ["有邀請碼？在這裡兌換", "招待コードをお持ちの方はこちら", "Have an invite code? Redeem it here", "초대 코드가 있나요? 여기서 사용"],
+"邀请码在这里兑换，不用绑支付方式；它不是结账页的折扣码。": ["邀請碼在這裡兌換，不用綁支付方式；它不是結帳頁的折扣碼。", "招待コードはここで使います。支払い方法の登録は不要で、購入ページの割引コードではありません。", "Redeem invite codes here. No payment method needed; this is not the checkout discount code.", "초대 코드는 여기서 사용합니다. 결제 수단 등록이 필요 없으며 결제 페이지의 할인 코드가 아닙니다."],
+"两项必需权限还没都允许：现在不给也行，开始字幕时系统会再问一次。": ["兩項必需權限還沒都允許：現在不給也行，開始字幕時系統會再問一次。", "必須の2つの権限がまだ揃っていません。今は許可しなくても、字幕開始時にシステムが再度確認します。", "Both required permissions aren't granted yet. You can skip for now; macOS will ask again when you start captions.", "필수 권한 두 개가 아직 모두 허용되지 않았습니다. 지금 건너뛰어도 자막을 시작할 때 macOS가 다시 묻습니다."],
+"显示内容": ["顯示內容", "表示内容", "Show", "표시 내용"],
+"原文 + 译文": ["原文 + 譯文", "原文 + 訳文", "Source + translation", "원문 + 번역"],
+"仅译文": ["僅譯文", "訳文のみ", "Translation", "번역만"],
+"仅原文": ["僅原文", "原文のみ", "Source only", "원문만 표시"],
+"字幕窗宽度 %@%（屏幕宽的比例）": ["字幕窗寬度 %@%（螢幕寬的比例）", "字幕ウインドウの幅 %@%（画面幅に対する比率）", "Caption window width %@% of the screen", "자막 창 너비 %@%(화면 너비 기준)"],
+"紧凑字幕（只显示最近两句）": ["緊湊字幕（只顯示最近兩句）", "コンパクト字幕（直近2文のみ）", "Compact captions (last two lines only)", "간결한 자막(최근 두 문장만)"],
+"即时草稿译文（Apple 本地翻译，灰色；正式译文到达后替换）": ["即時草稿譯文（Apple 本地翻譯，灰色；正式譯文到達後替換）", "即時ドラフト訳（Apple のオンデバイス翻訳、灰色。正式な訳文が届いたら置き換え）", "Instant draft translation (Apple on-device, gray; replaced when the final arrives)", "즉시 초안 번역(Apple 온디바이스, 회색. 정식 번역이 오면 교체)"],
+"正在说的这句先用本机翻译出灰色草稿，几乎同步；首次会下载一次语言包。": ["正在說的這句先用本機翻譯出灰色草稿，幾乎同步；首次會下載一次語言包。", "話している最中の文をまず端末内翻訳で灰色表示。ほぼ同時に出ます。初回のみ言語パックをダウンロードします。", "The sentence being spoken gets a gray on-device draft almost instantly; a language pack downloads once.", "말하는 중인 문장을 기기 내 번역으로 먼저 회색으로 표시해 거의 동시에 나옵니다. 처음 한 번 언어 팩을 내려받습니다."],
+"YouTube：Chrome 扩展正在显示字幕": ["YouTube：Chrome 擴充功能正在顯示字幕", "YouTube：Chrome拡張が字幕を表示中", "YouTube: the Chrome extension is showing captions", "YouTube: Chrome 확장 프로그램이 자막 표시 중"],
+"YouTube 字幕由 Chrome 扩展显示，不需要再开字幕": ["YouTube 字幕由 Chrome 擴充功能顯示，不需要再開字幕", "YouTubeの字幕はChrome拡張が表示しています。ここで字幕を開始する必要はありません", "The Chrome extension is showing YouTube captions; no need to start captions here", "YouTube 자막은 Chrome 확장 프로그램이 표시합니다. 여기서 자막을 시작할 필요가 없습니다"],
+"YouTube（Chrome 扩展）": ["YouTube（Chrome 擴充功能）", "YouTube（Chrome拡張）", "YouTube (Chrome extension)", "YouTube(Chrome 확장 프로그램)"],
+"在 Chrome 里看 YouTube 时，扩展读取视频的字幕轨、提前翻译，把双语字幕贴在视频下方；账号和额度用的就是这里登录的。": ["在 Chrome 裡看 YouTube 時，擴充功能讀取影片的字幕軌、提前翻譯，把雙語字幕貼在影片下方；帳號和額度用的就是這裡登入的。", "ChromeでYouTubeを見るとき、拡張が字幕トラックを読み取って先に翻訳し、動画の下に二言語字幕を表示します。アカウントと利用枚はここでログインしたものを使います。", "When you watch YouTube in Chrome, the extension reads the caption track, translates ahead, and shows bilingual subtitles under the video, using the account and quota you sign in with here.", "Chrome에서 YouTube를 볼 때 확장 프로그램이 자막 트랙을 읽어 미리 번역하고 동영상 아래에 이중 언어 자막을 표시합니다. 계정과 사용량은 여기서 로그인한 것을 사용합니다."],
+"下载扩展（zip）": ["下載擴充功能（zip）", "拡張機能をダウンロード（zip）", "Download extension (zip)", "확장 프로그램 다운로드(zip)"],
+"打开 chrome://extensions": ["打開 chrome://extensions", "chrome://extensions を開く", "Open chrome://extensions", "chrome://extensions 열기"],
+"扩展状态：%@": ["擴充功能狀態：%@", "拡張の状態：%@", "Extension: %@", "확장 프로그램 상태: %@"],
+"已连接": ["已連接", "接続済み", "Connected", "연결됨"],
+"未连接": ["未連接", "未接続", "Not connected", "연결 안 됨"],
+"安装：解压 zip → Chrome 打开 chrome://extensions → 右上角开「开发者模式」→「加载已解压的扩展程序」选那个文件夹。之后打开任意有字幕的 YouTube 视频即可。": ["安裝：解壓 zip → Chrome 打開 chrome://extensions → 右上角開「開發人員模式」→「載入未封裝項目」選那個資料夾。之後打開任意有字幕的 YouTube 影片即可。", "インストール：zipを解凍 → Chromeで chrome://extensions を開く → 右上の「デベロッパーモード」をオン →「パッケージ化されていない拡張機能を読み込む」でそのフォルダを選択。あとは字幕付きのYouTube動画を開くだけです。", "Install: unzip → open chrome://extensions in Chrome → turn on Developer mode (top right) → Load unpacked → pick that folder. Then open any YouTube video that has captions.", "설치: zip 압축 해제 → Chrome에서 chrome://extensions 열기 → 오른쪽 위 「개발자 모드」 켜기 → 「압축해제된 확장 프로그램을 로드합니다」로 폴더 선택. 이후 자막이 있는 YouTube 동영상을 열면 됩니다."],
+"浏览器扩展正在这个网页上显示字幕": ["瀏覽器擴充功能正在這個網頁上顯示字幕", "ブラウザ拡張がこのページで字幕を表示中", "The browser extension is showing captions on this page", "브라우저 확장 프로그램이 이 페이지에서 자막을 표시 중"],
+"这个网页的字幕由浏览器扩展显示，不需要再开字幕": ["這個網頁的字幕由瀏覽器擴充功能顯示，不需要再開字幕", "このページの字幕はブラウザ拡張が表示しています。ここで字幕を開始する必要はありません", "Captions on this page come from the browser extension; no need to start captions here", "이 페이지의 자막은 브라우저 확장 프로그램이 표시합니다. 여기서 자막을 시작할 필요가 없습니다"],
+"浏览器扩展（Chrome）": ["瀏覽器擴充功能（Chrome）", "ブラウザ拡張（Chrome）", "Browser extension (Chrome)", "브라우저 확장 프로그램(Chrome)"],
+"看网页视频时，扩展读取视频自带的字幕轨、提前翻译，把双语字幕贴在播放器下方。目前支持 YouTube，后续会加 TED、Coursera 等；账号需要在 Chrome 扩展中单独登录。": ["觀看網頁影片時，擴充功能會讀取影片自帶的字幕軌、預先翻譯，並將雙語字幕顯示在播放器下方。目前支援 YouTube，之後會加入 TED、Coursera 等；帳號需要在 Chrome 擴充功能中另外登入。", "ウェブ動画では、拡張機能が動画の字幕トラックを読み取って先に翻訳し、プレーヤーの下に二言語字幕を表示します。現在は YouTube に対応し、今後 TED や Coursera なども追加予定です。アカウントは Chrome 拡張機能で別途ログインしてください。", "When you watch web videos, the extension reads the built-in caption track, translates ahead, and shows bilingual captions below the player. YouTube is supported today, with TED, Coursera, and others planned. Sign in separately in the Chrome extension.", "웹 동영상을 볼 때 확장 프로그램이 동영상의 자막 트랙을 읽어 미리 번역하고 플레이어 아래에 이중 언어 자막을 표시합니다. 현재 YouTube를 지원하며 TED, Coursera 등도 추후 추가할 예정입니다. 계정은 Chrome 확장 프로그램에서 별도로 로그인하세요."],
+"安装：解压 zip → Chrome 打开 chrome://extensions → 右上角开「开发者模式」→「加载已解压的扩展程序」选那个文件夹。装好后这里会变成「已连接」。": ["安裝：解壓 zip → Chrome 打開 chrome://extensions → 右上角開「開發人員模式」→「載入未封裝項目」選那個資料夾。裝好後這裡會變成「已連接」。", "インストール：zipを解凍 → Chromeで chrome://extensions を開く → 右上の「デベロッパーモード」をオン →「パッケージ化されていない拡張機能を読み込む」でそのフォルダを選択。完了するとここが「接続済み」になります。", "Install: unzip → open chrome://extensions in Chrome → turn on Developer mode → Load unpacked → pick that folder. This will switch to Connected once it is installed.", "설치: zip 압축 해제 → Chrome에서 chrome://extensions 열기 → 「개발자 모드」 켜기 → 「압축해제된 확장 프로그램을 로드합니다」로 폴더 선택. 설치되면 여기가 「연결됨」으로 바뀝니다."],
+"最近一次联系：%@": ["最近一次聯繫：%@", "最終通信：%@", "Last seen: %@", "마지막 연결: %@"],
+"扩展有新版本（装着 %@，最新 %@）": ["擴充功能有新版本（裝著 %@，最新 %@）", "拡張機能に新しいバージョンがあります（現在 %@、最新 %@）", "A newer extension is available (installed %@, latest %@)", "확장 프로그램의 새 버전이 있습니다(설치됨 %@, 최신 %@)"],
+"下载新版": ["下載新版", "新しいバージョンをダウンロード", "Download update", "업데이트 다운로드"],
+"下载后解压，在 chrome://extensions 删掉旧的再「加载已解压的扩展程序」选新文件夹。": ["下載後解壓，在 chrome://extensions 刪掉舊的再「載入未封裝項目」選新資料夾。", "ダウンロードして解凍し、chrome://extensions で古いものを削除してから「パッケージ化されていない拡張機能を読み込む」で新しいフォルダを選んでください。", "Unzip it, remove the old one at chrome://extensions, then Load unpacked and pick the new folder.", "압축을 풀고 chrome://extensions에서 기존 항목을 삭제한 뒤 「압축해제된 확장 프로그램을 로드합니다」로 새 폴더를 선택하세요."],
+"扩展 %@ · 最近一次联系：%@": ["擴充功能 %@ · 最近一次聯繫：%@", "拡張 %@ · 最終通信：%@", "Extension %@ · last seen %@", "확장 프로그램 %@ · 마지막 연결 %@"],
+"重新运行首次引导": ["重新執行首次引導", "初回セットアップをやり直す", "Run first-time setup again", "처음 설정 다시 실행"],
+"会议语言：%@": ["會議語言：%@", "会議の言語：%@", "Meeting language: %@", "회의 언어: %@"],
+"更多会议语言…": ["更多會議語言…", "ほかの会議言語…", "More meeting languages…", "더 많은 회의 언어…"],
+"已切换为%@": ["已切換為%@", "%@に切り替えました", "Switched to %@", "%@(으)로 전환됨"],
+"正在切换为%@…": ["正在切換為%@…", "%@に切り替えています…", "Switching to %@…", "%@(으)로 전환 중…"],
+"切换会议语言失败：%@": ["切換會議語言失敗：%@", "会議の言語を切り替えられません：%@", "Couldn't switch meeting language: %@", "회의 언어를 전환할 수 없음: %@"],
+"切换会议语言失败，字幕已停止": ["切換會議語言失敗，字幕已停止", "会議の言語を切り替えられなかったため、字幕を停止しました", "Couldn't switch meeting language, so captions stopped", "회의 언어를 전환하지 못해 자막을 중지했습니다"],
+"日历": ["行事曆", "カレンダー", "Calendar", "캘린더"],
+"日历会议": ["行事曆會議", "カレンダーの会議", "Calendar meeting", "캘린더 회의"],
+"macOS 日历": ["macOS 行事曆", "macOSカレンダー", "macOS Calendar", "macOS 캘린더"],
+"Google 日历": ["Google 行事曆", "Googleカレンダー", "Google Calendar", "Google 캘린더"],
+"连接 macOS 日历，开会前选择会议，Kikishima 会用标题和参会者姓名准备术语。": ["連接 macOS 行事曆，在開會前選擇會議，Kikishima 會用標題和與會者姓名準備術語。", "macOSカレンダーを接続して会議を選ぶと、Kikishimaがタイトルと参加者名を会議用語として準備します。", "Connect macOS Calendar and choose a meeting. Kikishima will prepare its title and attendee names as meeting terms.", "macOS 캘린더를 연결하고 회의를 선택하면 Kikishima가 제목과 참석자 이름을 회의 용어로 준비합니다."],
+"允许访问日历": ["允許存取行事曆", "カレンダーへのアクセスを許可", "Allow Calendar Access", "캘린더 접근 허용"],
+"允许访问": ["允許存取", "アクセスを許可", "Allow Access", "접근 허용"],
+"正在读取会议…": ["正在讀取會議…", "会議を読み込み中…", "Loading meetings…", "회의 불러오는 중…"],
+"Kikishima 没有日历权限，仍可直接开始字幕。": ["Kikishima 沒有行事曆權限，仍可直接開始字幕。", "Kikishimaにカレンダーの権限がなくても、そのまま字幕を開始できます。", "Kikishima does not have Calendar access. You can still start captions.", "Kikishima에 캘린더 권한이 없어도 자막을 바로 시작할 수 있습니다."],
+"接下来没有找到会议。": ["接下來沒有找到會議。", "このあとの会議は見つかりませんでした。", "No upcoming meetings found.", "예정된 회의를 찾지 못했습니다."],
+"刷新": ["重新整理", "更新", "Refresh", "새로고침"],
+"用于这场会议": ["用於這場會議", "この会議に使用", "Use for This Meeting", "이 회의에 사용"],
+"今天的会议…": ["今天的會議…", "今日の会議…", "Today's Meetings…", "오늘의 회의…"],
+"已用于这场会议": ["已用於這場會議", "この会議に使用中", "Using for This Meeting", "이 회의에 사용 중"],
+"更换会议": ["更換會議", "会議を変更", "Change Meeting", "회의 변경"],
+"清除": ["清除", "クリア", "Clear", "지우기"],
+"%@ 位参会者": ["%@ 位與會者", "参加者%@人", "%@ attendees", "참석자 %@명"],
+"今天的会议": ["今天的會議", "今日の会議", "Today's Meetings", "오늘의 회의"],
+"今天没有找到会议": ["今天沒有找到會議", "今日の会議は見つかりませんでした", "No Meetings Found Today", "오늘 회의를 찾지 못했습니다"],
+"你仍可不选择会议，直接开始字幕。": ["你仍可不選擇會議，直接開始字幕。", "会議を選ばず、そのまま字幕を開始することもできます。", "You can still start captions without choosing a meeting.", "회의를 선택하지 않고 자막을 바로 시작할 수 있습니다."],
+"macOS 会显示“完全访问”。Kikishima 只读取会议标题、时间和参会者姓名，不会修改你的日历。": ["macOS 會顯示「完全存取」。Kikishima 只會讀取會議標題、時間和與會者姓名，不會修改你的行事曆。", "macOSでは「フルアクセス」と表示されます。Kikishimaは会議のタイトル、時刻、参加者名だけを読み取り、カレンダーを変更しません。", "macOS will show “Full Access.” Kikishima only reads meeting titles, times, and attendee names. It never changes your calendar.", "macOS에는 ‘전체 접근 권한’으로 표시됩니다. Kikishima는 회의 제목, 시간, 참석자 이름만 읽으며 캘린더를 변경하지 않습니다."],
+"请前往：系统设置 > 隐私与安全性 > 日历 > Kikishima": ["請前往：系統設定 > 隱私權與安全性 > 行事曆 > Kikishima", "システム設定 > プライバシーとセキュリティ > カレンダー > Kikishima を開いてください", "Go to: System Settings > Privacy & Security > Calendars > Kikishima", "다음으로 이동하세요: 시스템 설정 > 개인정보 보호 및 보안 > 캘린더 > Kikishima"],
+"重新连接": ["重新連接", "再接続", "Reconnect", "다시 연결"],
+"开着就拖不动字幕窗；用菜单里的「重置字幕位置」来摆位。": ["開著就拖不動字幕窗；用選單裡的「重設字幕位置」來擺位。", "オンの間は字幕ウインドウをドラッグできません。メニューの「字幕の位置をリセット」で位置を決めてください。", "While on, the caption window can't be dragged; use Reset caption position to place it.", "켜져 있으면 자막 창을 드래그할 수 없습니다. 메뉴의 「자막 위치 재설정」으로 배치하세요."],
+"3. 字幕默认显示在屏幕顶部的灵动岛，也可在菜单面板切到桌面窗口。": ["3. 字幕預設顯示在螢幕頂部的靈動島，也可在選單面板切到桌面視窗。", "3. 字幕はデフォルトで画面上部のアイランドに表示されます。メニューパネルでデスクトップ ウインドウに切り替えることもできます。", "3. Captions appear in the Island at the top of the screen by default. You can switch to a Desktop window in the menu panel.", "3. 자막은 기본적으로 화면 상단의 아일랜드에 표시됩니다. 메뉴 패널에서 데스크탑 창으로 전환할 수도 있습니다."],
+})
+
+T.update({
+"部分字幕未翻译完成，可重试": ["部分字幕尚未翻譯完成，可重試", "一部の字幕の翻訳が完了していません。再試行できます", "Some captions are not fully translated. You can retry.", "일부 자막의 번역이 완료되지 않았습니다. 다시 시도할 수 있습니다."],
+})
+
+T.update({
+"没听到声音": ["沒聽到聲音", "音声が聞こえません", "No sound detected", "소리가 감지되지 않음"],
+"模型已安装": ["模型已安裝", "モデルはインストール済み", "Model installed", "모델 설치됨"],
+"常用会议语言": ["常用會議語言", "よく使う会議の言語", "Usual meeting languages", "자주 쓰는 회의 언어"],
+})
+
+T.update({
+ "尚未确认系统音频权限，请在系统设置里检查；播放声音后回来重试。": [
+  "尚未確認系統音訊權限，請在系統設定裡檢查；播放聲音後回來重試。",
+  "システム音声の権限を確認できません。システム設定を確認し、音声を再生してから再試行してください。",
+  "System audio access is unconfirmed. Check System Settings, then play audio and return to retry.",
+  "시스템 오디오 권한을 확인하지 못했습니다. 시스템 설정을 확인하고 소리를 재생한 후 다시 시도하세요."
+ ],
+ "还没有会议记录。停止字幕时会自动保存到「%@」。": [
+  "還沒有會議記錄。停止字幕時會自動儲存到「%@」。",
+  "会議の記録はまだありません。字幕を停止すると「%@」に自動保存されます。",
+  "No transcripts yet. When captions stop, they are saved to “%@”.",
+  "아직 회의 기록이 없습니다. 자막을 중지하면 「%@」에 자동 저장됩니다."
+ ],
+ "停止字幕时会自动保存到「%@」。": [
+  "停止字幕時會自動儲存到「%@」。",
+  "字幕を停止すると「%@」に自動保存されます。",
+  "When captions stop, they are saved to “%@”.",
+  "자막을 중지하면 「%@」에 자동 저장됩니다."
+ ],
+ "桌面窗口可拖动、可改大小。": [
+  "桌面視窗可拖曳、可改大小。",
+  "デスクトップ ウインドウはドラッグとサイズ変更ができます。",
+  "The desktop window can be dragged and resized.",
+  "데스크탑 창은 드래그와 크기 조절이 가능합니다."
+ ],
+ "删除 %@": [
+  "刪除 %@",
+  "%@を削除",
+  "Remove %@",
+  "%@ 삭제"
+ ],
+ "下载中 %@%": [
+  "下載中 %@%",
+  "ダウンロード %@%",
+  "Download %@%",
+  "다운로드 중 %@%"
+ ]
+})
+
+T.update({
+ "切换音频来源，当前 %@": [
+  "切換音訊來源，目前 %@",
+  "音声出力を切り替え、現在 %@",
+  "Switch audio source, currently %@",
+  "오디오 소스 전환, 현재 %@"
+ ],
+ "未知设备": [
+  "未知裝置",
+  "不明なデバイス",
+  "Unknown device",
+  "알 수 없는 기기"
+ ],
+ "已安装": [
+  "已安裝",
+  "インストール済み",
+  "Installed",
+  "설치됨"
+ ],
+ "暂停": [
+  "暫停",
+  "一時停止",
+  "Pause",
+  "일시 정지"
+ ]
+})
+
+T.update({
+ "隐藏边栏": ["隱藏側邊欄", "サイドバーを非表示", "Hide Sidebar", "사이드바 가리기"],
+ "显示边栏": ["顯示側邊欄", "サイドバーを表示", "Show Sidebar", "사이드바 보기"]
+})
+
+T.update({
+ "管理订阅": ["管理訂閱", "サブスクリプションを管理", "Manage subscription", "구독 관리"],
+ "恢复购买": ["恢復購買", "購入を復元", "Restore purchases", "구매 복원"],
+ "正在连接订阅服务…": ["正在連接訂閱服務…", "サブスクリプションサービスに接続中…", "Connecting to subscription service…", "구독 서비스에 연결 중…"],
+ "订阅服务尚未配置，请稍后重试": ["訂閱服務尚未設定，請稍後再試", "サブスクリプションサービスの準備ができていません。時間をおいてお試しください", "Subscriptions are not set up yet. Please try again later.", "구독 서비스가 아직 설정되지 않았습니다. 나중에 다시 시도하세요."],
+ "未找到与当前账号绑定的购买，请确认账号或联系支持": ["找不到與目前帳號綁定的購買，請確認帳號或聯絡支援", "このアカウントに紐づく購入が見つかりません。アカウントを確認するかサポートにお問い合わせください", "No purchase is linked to this account. Check your account or contact support.", "현재 계정에 연결된 구매가 없습니다. 계정을 확인하거나 지원팀에 문의하세요."],
+ "操作太频繁，请稍后重试": ["操作太頻繁，請稍後再試", "操作が多すぎます。少し待ってからお試しください", "Too many requests. Please try again shortly.", "요청이 너무 많습니다. 잠시 후 다시 시도하세요."],
+ "无法连接订阅服务，请稍后重试": ["無法連接訂閱服務，請稍後再試", "サブスクリプションサービスに接続できません。時間をおいてお試しください", "Could not connect to the subscription service. Please try again.", "구독 서비스에 연결할 수 없습니다. 나중에 다시 시도하세요."],
+ "购买将绑定当前登录账号，付款邮箱仅用于联系。": ["購買將綁定目前登入的帳號，付款信箱僅用於聯絡。", "購入は現在ログイン中のアカウントに紐づきます。支払い時のメールアドレスは連絡用です。", "Purchases are linked to your signed-in account. The billing email is only for contact.", "구매는 현재 로그인한 계정에 연결됩니다. 결제 이메일은 연락용으로만 사용됩니다."],
+ "免费版每周 60 分钟，登录即用；购买后当前账号自动升级 Pro。": ["免費版每週 60 分鐘，登入即用；購買後目前帳號自動升級 Pro。", "無料プランは週60分。ログインすればすぐ使えます。購入後は現在のアカウントが自動的にProになります。", "Free plan: 60 minutes a week. After purchase, your signed-in account is upgraded to Pro automatically.", "무료 플랜은 주 60분. 구매 후 현재 로그인한 계정이 자동으로 Pro로 업그레이드됩니다."],
+ "免费版：每周 60 分钟翻译字幕，购买后当前账号自动升级 Pro。": ["免費版：每週 60 分鐘翻譯字幕，購買後目前帳號自動升級 Pro。", "無料プラン：翻訳字幕は週60分。購入後は現在のアカウントが自動的にProになります。", "Free plan: 60 minutes of translated captions a week. Purchase upgrades your signed-in account to Pro automatically.", "무료 플랜: 주 60분 번역 자막. 구매 후 현재 로그인한 계정이 자동으로 Pro로 업그레이드됩니다."]
+})
+
+T.update({
+ "已停止采音，正在完成最后一句…": [
+  "已停止收音，正在完成最後一句…",
+  "音声の取得を停止しました。最後の字幕を処理中…",
+  "Audio capture stopped. Finishing the last captions…",
+  "오디오 캡처를 멈췄습니다. 마지막 자막을 마무리하는 중…"
+ ],
+ "部分字幕未翻译完成，可在记录中重试": [
+  "部分字幕尚未翻譯完成，可在記錄中重試",
+  "一部の字幕は未翻訳です。記録から再試行できます",
+  "Some captions are unfinished. Retry from History.",
+  "일부 자막의 번역이 끝나지 않았습니다. 기록에서 다시 시도할 수 있습니다."
+ ],
+ "译文未完成，原文已保留": [
+  "譯文未完成，原文已保留",
+  "翻訳は未完了です。原文は保存されています",
+  "Translation unfinished; original text preserved",
+  "번역 미완료, 원문은 저장되었습니다"
+ ],
+ "正在补翻未完成字幕…": [
+  "正在補翻未完成字幕…",
+  "未完了の字幕を翻訳中…",
+  "Translating unfinished captions…",
+  "미완료 자막을 번역하는 중…"
+ ],
+ "记录已改变或不支持补翻，请打开原始记录。": [
+  "記錄已變更或不支援補翻，請開啟原始記錄。",
+  "記録が変更されたか、再翻訳に対応していません。元の記録を開いてください。",
+  "This record changed or does not support retry. Open the original record.",
+  "기록이 변경되었거나 재번역을 지원하지 않습니다. 원본 기록을 열어 주세요."
+ ],
+ "记录过长，暂不支持补翻。": [
+  "記錄過長，暫不支援補翻。",
+  "記録が長すぎるため、再翻訳はまだ対応していません。",
+  "This record is too long to retry.",
+  "기록이 너무 길어 다시 번역할 수 없습니다."
+ ],
+ "登录后才能补翻记录。": [
+  "登入後才能補翻記錄。",
+  "記録を再翻訳するにはログインしてください。",
+  "Sign in to translate unfinished records.",
+  "기록을 다시 번역하려면 로그인해 주세요."
+ ],
+ "补翻已结束，已完成的译文已保存；未完成部分可再次重试。": [
+  "補翻已結束，已完成的譯文已儲存；未完成部分可再次重試。",
+  "処理が終了し、完了した翻訳を保存しました。未完了の部分は再試行できます。",
+  "Retry finished. Completed translations are saved; unfinished parts can be retried.",
+  "재번역이 끝났습니다. 완료된 번역은 저장되었으며 미완료 부분은 다시 시도할 수 있습니다."
+ ],
+ "记录已改变或无法保存，补翻已停止。": [
+  "記錄已變更或無法儲存，補翻已停止。",
+  "記録が変更されたか保存できないため、再翻訳を停止しました。",
+  "Retry stopped because the record changed or could not be saved.",
+  "기록이 변경되었거나 저장할 수 없어 재번역을 멈췄습니다."
+ ],
+ "还有 %@ 段译文未完成，原文已保留。": [
+  "還有 %@ 段譯文未完成，原文已保留。",
+  "未完了の翻訳が %@ 件あります。原文は保存されています。",
+  "%@ translations are unfinished. Original text is preserved.",
+  "번역 %@개가 미완료 상태입니다. 원문은 저장되었습니다."
+ ],
+ "重试未完成字幕": [
+  "重試未完成字幕",
+  "未完了の字幕を再翻訳",
+  "Retry unfinished captions",
+  "미완료 자막 다시 번역"
+ ],
+ "补翻已停止，已完成的译文已保存。": [
+  "補翻已停止，已完成的譯文已儲存。",
+  "再翻訳を停止しました。完了した翻訳は保存されています。",
+  "Retry stopped. Completed translations are saved.",
+  "재번역을 멈췄습니다. 완료된 번역은 저장되었습니다."
+ ],
+ "翻译引擎": [
+  "翻譯引擎",
+  "翻訳エンジン",
+  "Translation engine",
+  "번역 엔진"
+ ],
+ "Kikishima AI": [
+  "Kikishima AI",
+  "Kikishima AI",
+  "Kikishima AI",
+  "Kikishima AI"
+ ],
+ "自带 OpenAI Key": [
+  "自帶 OpenAI Key",
+  "独自の OpenAI Key",
+  "Your own OpenAI key",
+  "자체 OpenAI 키"
+ ],
+ "OpenAI API Key": [
+  "OpenAI API Key",
+  "OpenAI API キー",
+  "OpenAI API key",
+  "OpenAI API 키"
+ ],
+ "保存": [
+  "儲存",
+  "保存",
+  "Save",
+  "저장"
+ ],
+ "已保存：%@": [
+  "已儲存：%@",
+  "保存済み：%@",
+  "Saved: %@",
+  "저장됨: %@"
+ ],
+ "清除": [
+  "清除",
+  "クリア",
+  "Clear",
+  "지우기"
+ ],
+ "还没有保存 Key。粘贴后点「保存」。": [
+  "還沒有儲存 Key。貼上後點「儲存」。",
+  "Key が未保存です。貼り付けて「保存」を押してください。",
+  "No key saved yet. Paste one and click Save.",
+  "저장된 키가 없습니다. 붙여넣은 뒤 저장을 누르세요."
+ ],
+ "这个 Key 看起来不完整，请粘贴完整的 OpenAI API Key。": [
+  "這個 Key 看起來不完整，請貼上完整的 OpenAI API Key。",
+  "この Key は不完全です。OpenAI API Key 全体を貼り付けてください。",
+  "This key looks incomplete. Paste the full OpenAI API key.",
+  "이 키는 불완전해 보입니다. OpenAI API 키 전체를 붙여넣으세요."
+ ],
+ "Key 只保存在这台 Mac 的钥匙串里，不会上传到 Kikishima。字幕文字会从这台 Mac 直接发送给 OpenAI，不经过我们的服务器。": [
+  "Key 只儲存在這台 Mac 的鑰匙圈裡，不會上傳到 Kikishima。字幕文字會從這台 Mac 直接傳送給 OpenAI，不經過我們的伺服器。",
+  "Key はこの Mac のキーチェーンにのみ保存され、Kikishima には送信されません。字幕テキストはこの Mac から OpenAI に直接送信され、当社のサーバーは経由しません。",
+  "The key is stored only in this Mac's Keychain and is never uploaded to Kikishima. Caption text goes directly from this Mac to OpenAI, not through our servers.",
+  "키는 이 Mac의 키체인에만 저장되며 Kikishima로 전송되지 않습니다. 자막 텍스트는 이 Mac에서 OpenAI로 직접 전송되며 당사 서버를 거치지 않습니다."
+ ],
+ "自带 Key 不计入 Kikishima 的免费额度或 Pro 订阅；会议总结仍使用 Kikishima 服务并需要登录。": [
+  "自帶 Key 不計入 Kikishima 的免費額度或 Pro 訂閱；會議摘要仍使用 Kikishima 服務並需要登入。",
+  "独自の Key は Kikishima の無料枠や Pro サブスクリプションには含まれません。会議要約は引き続き Kikishima のサービスを使うため、ログインが必要です。",
+  "Your own key is not counted against Kikishima's free quota or Pro subscription. Meeting summaries still use the Kikishima service and require sign-in.",
+  "자체 키는 Kikishima 무료 할당량이나 Pro 구독에 포함되지 않습니다. 회의 요약은 계속 Kikishima 서비스를 사용하며 로그인이 필요합니다."
+ ],
+ "使用 Kikishima 的翻译服务，按账号额度计费。": [
+  "使用 Kikishima 的翻譯服務，按帳號額度計費。",
+  "Kikishima の翻訳サービスを使用し、アカウントの枠で課金されます。",
+  "Uses the Kikishima translation service and counts against your account quota.",
+  "Kikishima 번역 서비스를 사용하며 계정 할당량에 포함됩니다."
+ ],
+ "未填写 OpenAI Key": [
+  "未填寫 OpenAI Key",
+  "OpenAI Key 未入力",
+  "OpenAI key missing",
+  "OpenAI 키 없음"
+ ],
+ "OpenAI API Key 无效或已撤销，更新 Key 后继续翻译": [
+  "OpenAI API Key 無效或已撤銷，更新 Key 後繼續翻譯",
+  "OpenAI API Key が無効か取り消されました。Key を更新すると翻訳が再開します",
+  "OpenAI API key is invalid or revoked. Update the key to resume translation.",
+  "OpenAI API 키가 유효하지 않거나 취소되었습니다. 키를 업데이트하면 번역이 재개됩니다."
+ ],
+ "OpenAI Key 无效": [
+  "OpenAI Key 無效",
+  "OpenAI Key が無効です",
+  "Invalid OpenAI key",
+  "OpenAI 키가 유효하지 않음"
+ ],
+ "还没有填写 OpenAI API Key，翻译已暂停": [
+  "還沒有填寫 OpenAI API Key，翻譯已暫停",
+  "OpenAI API Key が未入力のため、翻訳を一時停止しました",
+  "No OpenAI API key yet, so translation is paused",
+  "OpenAI API 키가 없어 번역이 일시 정지되었습니다"
+ ],
+ "缺少 OpenAI Key": [
+  "缺少 OpenAI Key",
+  "OpenAI Key がありません",
+  "OpenAI key missing",
+  "OpenAI 키 없음"
+ ],
+ "登录后才能继续翻译": [
+  "登入後才能繼續翻譯",
+  "ログインすると翻訳を再開できます",
+  "Sign in to continue translating",
+  "로그인하면 번역을 계속할 수 있습니다"
+ ],
+ "打开设置": [
+  "開啟設定",
+  "設定を開く",
+  "Open settings",
+  "설정 열기"
+ ],
+ "会议总结使用 Kikishima 服务，需要登录后才能生成。字幕翻译仍可使用自带的 OpenAI Key。": [
+  "會議摘要使用 Kikishima 服務，需要登入後才能產生。字幕翻譯仍可使用自帶的 OpenAI Key。",
+  "会議要約は Kikishima のサービスを使うため、ログインが必要です。字幕翻訳は引き続き独自の OpenAI Key を使えます。",
+  "Meeting summaries use the Kikishima service and require sign-in. Caption translation can still use your own OpenAI key.",
+  "회의 요약은 Kikishima 서비스를 사용하며 로그인이 필요합니다. 자막 번역은 계속 자체 OpenAI 키를 사용할 수 있습니다."
+ ],
+ "%@ · %@": ["%@ · %@", "%@ · %@", "%@ · %@", "%@ · %@"],
+ "Apple 本机翻译": ["Apple 本機翻譯", "Apple オンデバイス翻訳", "Apple on-device translation", "Apple 온디바이스 번역"],
+ "Apple 本机翻译暂时不使用术语表；需要固定译法请切换到 OpenAI Key。": [
+  "Apple 本機翻譯暫不使用術語表；需要固定譯法請切換到 OpenAI Key。",
+  "Apple のオンデバイス翻訳は用語集に未対応です。固定訳が必要な場合は OpenAI Key に切り替えてください。",
+  "Apple on-device translation does not use the glossary yet. Switch to an OpenAI key if you need fixed terms.",
+  "Apple 온디바이스 번역은 아직 용어집을 사용하지 않습니다. 고정 번역이 필요하면 OpenAI 키로 전환하세요."
+ ],
+ "OpenAI Key": ["OpenAI Key", "OpenAI キー", "OpenAI key", "OpenAI 키"],
+ "OpenAI Key 只用于你选择的翻译和总结；会议总结默认用本机模型，不联网。": [
+  "OpenAI Key 只用於你選擇的翻譯和摘要；會議摘要預設用本機模型，不連網。",
+  "OpenAI Key は選択した翻訳と要約にのみ使われます。会議要約は既定でオンデバイスモデルを使い、ネット接続しません。",
+  "An OpenAI key is used only for the translation and summaries you choose. Meeting summaries use the on-device model by default and do not use the network.",
+  "OpenAI 키는 선택한 번역과 요약에만 사용됩니다. 회의 요약은 기본적으로 온디바이스 모델을 사용하며 네트워크를 쓰지 않습니다."
+ ],
+ "下载模型": ["下載模型", "モデルをダウンロード", "Download model", "모델 다운로드"],
+ "不联网，不需要下载。": ["不連網，不需要下載。", "ネット接続もダウンロードも不要。", "No network or download needed.", "네트워크나 다운로드가 필요 없습니다."],
+ "会议总结默认使用本机模型；选择 OpenAI Key 时会直接用 Key。字幕翻译同样可以在设置里切换。": [
+  "會議摘要預設使用本機模型；選擇 OpenAI Key 時會直接用 Key。字幕翻譯同樣可以在設定裡切換。",
+  "会議要約は既定でオンデバイスモデルを使います。OpenAI Key を選ぶと Key を直接使います。字幕翻訳も設定で切り替えられます。",
+  "Meeting summaries use the on-device model by default; with an OpenAI key they use the key directly. Caption translation can be switched the same way in Settings.",
+  "회의 요약은 기본적으로 온디바이스 모델을 사용하며, OpenAI 키를 선택하면 키를 직접 사용합니다. 자막 번역도 설정에서 전환할 수 있습니다."
+ ],
+ "去设置": ["前往設定", "設定へ", "Open settings", "설정으로"],
+ "已保存 %@": ["已儲存 %@", "保存済み %@", "Saved %@", "저장됨 %@"],
+ "开始后会播放测试语音，用系统音频识别并本机翻译。看到原文和译文后才能完成引导。": [
+  "開始後會播放測試語音，用系統音訊辨識並本機翻譯。看到原文和譯文後才能完成引導。",
+  "開始するとテスト音声を再生し、システム音声を認識してオンデバイスで翻訳します。原文と訳文を確認すると設定を完了できます。",
+  "Starting plays test speech, recognizes system audio and translates on-device. Setup finishes after you see real source text and a translation.",
+  "시작하면 테스트 음성을 재생하고 시스템 오디오를 인식하여 온디바이스로 번역합니다. 실제 원문과 번역이 표시되면 설정을 완료할 수 있습니다."
+ ],
+ "本机翻译不可用": ["本機翻譯無法使用", "オンデバイス翻訳を利用できません", "On-device translation unavailable", "온디바이스 번역을 사용할 수 없음"],
+ "本机翻译暂不可用，请下载语言包或换一个引擎": [
+  "本機翻譯暫時無法使用，請下載語言包或換一個引擎",
+  "オンデバイス翻訳を一時的に利用できません。言語パックをダウンロードするか、別のエンジンに切り替えてください。",
+  "On-device translation is temporarily unavailable. Download the language pack or switch engines.",
+  "온디바이스 번역을 일시적으로 사용할 수 없습니다. 언어 팩을 다운로드하거나 다른 엔진으로 전환하세요."
+ ],
+ "本机高质量模型暂时不可用": ["本機高品質模型暫時無法使用", "高品質オンデバイスモデルを一時的に利用できません", "The high-quality on-device model is temporarily unavailable", "고품질 온디바이스 모델을 일시적으로 사용할 수 없습니다"],
+ "本机高质量模型没有返回译文": ["本機高品質模型沒有傳回譯文", "高品質オンデバイスモデルが訳文を返しませんでした", "The high-quality on-device model returned no translation", "고품질 온디바이스 모델이 번역을 반환하지 않았습니다"],
+ "模型加载失败：%@": ["模型載入失敗：%@", "モデルの読み込みに失敗しました：%@", "Model failed to load: %@", "모델을 불러오지 못했습니다: %@"],
+ "模型已就绪": ["模型已就緒", "モデルの準備ができました", "Model ready", "모델 준비 완료"],
+ "正在加载模型…": ["正在載入模型…", "モデルを読み込み中…", "Loading model…", "모델 불러오는 중…"],
+ "自带 OpenAI Key 还没有填写。": ["自帶 OpenAI Key 還沒有填寫。", "独自の OpenAI Key が未入力です。", "Your OpenAI key is not filled in yet.", "자체 OpenAI 키가 아직 입력되지 않았습니다."],
+ "请先在设置里下载高质量本机模型": ["請先在設定裡下載高品質本機模型", "設定で高品質オンデバイスモデルを先にダウンロードしてください", "Download the high-quality on-device model in Settings first", "설정에서 고품질 온디바이스 모델을 먼저 다운로드하세요"],
+ "质量比 Apple 本机翻译更高，但每句会慢一些。下载一次后离线可用。": [
+  "品質比 Apple 本機翻譯更高，但每句會慢一些。下載一次後離線可用。",
+  "Apple のオンデバイス翻訳より高品質ですが、1 文ごとに少し遅くなります。一度ダウンロードすればオフラインで使えます。",
+  "Higher quality than Apple on-device translation, but slower per sentence. Download once and it works offline.",
+  "Apple 온디바이스 번역보다 품질이 높지만 문장당 조금 느립니다. 한 번 다운로드하면 오프라인에서 사용할 수 있습니다."
+ ],
+ "还没有填写 Key。": ["還沒有填寫 Key。", "Key が未入力です。", "No key filled in yet.", "키가 아직 입력되지 않았습니다."],
+ "需要下载模型，质量更高但更慢。": ["需要下載模型，品質更高但更慢。", "モデルのダウンロードが必要です。高品質ですが遅くなります。", "Needs a model download. Higher quality but slower.", "모델 다운로드가 필요합니다. 품질은 높지만 느립니다."],
+ "音频不会上传。会议文字和称呼只在本机用于生成会议总结；选择 OpenAI Key 时会直接发送给 OpenAI，不经过 Kikishima。关闭会议总结不会关闭本机会议记录。": [
+  "音訊不會上傳。會議文字和稱呼只在本機用於產生會議摘要；選擇 OpenAI Key 時會直接傳送給 OpenAI，不經過 Kikishima。關閉會議摘要不會關閉本機會議記錄。",
+  "音声はアップロードされません。会議テキストと呼び名はオンデバイスで会議要約を生成するためだけに使われます。OpenAI Key を選ぶと OpenAI に直接送信され、Kikishima は経由しません。会議要約をオフにしてもローカル記録は残ります。",
+  "Audio is never uploaded. Meeting text and aliases are used only on this Mac to generate meeting summaries; with an OpenAI key they go directly to OpenAI, not through Kikishima. Turning off meeting summaries does not delete local meeting records.",
+  "오디오는 업로드되지 않습니다. 회의 텍스트와 호칭은 이 Mac에서 회의 요약을 생성하는 데만 사용됩니다. OpenAI 키를 선택하면 OpenAI로 직접 전송되며 Kikishima를 거치지 않습니다. 회의 요약을 꺼도 로컬 회의 기록은 유지됩니다."
+ ],
+ "音频只在本机转写，从不上传。默认翻译和会议总结都在本机完成，文字不会离开这台 Mac。只有你选择「自带 OpenAI Key」时，字幕文字或总结输入才会从这台 Mac 直接发送给 OpenAI，不经过 Kikishima。会议记录与总结只存在你的 Mac 上。": [
+  "音訊只在本機轉寫，從不上傳。預設翻譯和會議摘要都在本機完成，文字不會離開這台 Mac。只有你選擇「自帶 OpenAI Key」時，字幕文字或摘要輸入才會從這台 Mac 直接傳送給 OpenAI，不經過 Kikishima。會議記錄與摘要只存在你的 Mac 上。",
+  "音声はオンデバイスで文字起こしされ、アップロードされません。既定の翻訳と会議要約はオンデバイスで完了し、テキストはこの Mac から出ません。独自の OpenAI Key を選んだ場合のみ、字幕テキストや要約入力がこの Mac から OpenAI に直接送信され、Kikishima は経由しません。会議記録と要約はこの Mac にのみ保存されます。",
+  "Audio is transcribed on-device and never uploaded. Default translation and meeting summaries happen on-device, so text does not leave this Mac. Only when you choose your own OpenAI key are caption text or summary input sent directly from this Mac to OpenAI, not through Kikishima. Meeting records and summaries stay on your Mac.",
+  "오디오는 온디바이스에서 전사되며 업로드되지 않습니다. 기본 번역과 회의 요약은 온디바이스에서 처리되어 텍스트가 이 Mac을 떠나지 않습니다. 자체 OpenAI 키를 선택한 경우에만 자막 텍스트나 요약 입력이 이 Mac에서 OpenAI로 직접 전송되며 Kikishima를 거치지 않습니다. 회의 기록과 요약은 이 Mac에만 저장됩니다."
+ ],
+ "高质量本机模型": ["高品質本機模型", "高品質オンデバイスモデル", "High-quality on-device model", "고품질 온디바이스 모델"],
+ "高质量本机（MLX）": ["高品質本機（MLX）", "高品質オンデバイス（MLX）", "High-quality on-device (MLX)", "고품질 온디바이스(MLX)"],
+ "默认使用 Apple 本机翻译：不联网、不需要下载模型，第一句可能要等系统安装语言包。": [
+  "預設使用 Apple 本機翻譯：不連網、不需要下載模型，第一句可能要等系統安裝語言包。",
+  "既定では Apple のオンデバイス翻訳を使います。ネット接続もモデルのダウンロードも不要ですが、最初の 1 文はシステムの言語パック準備を待つ場合があります。",
+  "Uses Apple on-device translation by default: no network or model download, though the first sentence may wait for the system language pack.",
+  "기본적으로 Apple 온디바이스 번역을 사용합니다. 네트워크나 모델 다운로드가 필요 없지만 첫 문장은 시스템 언어 팩 설치를 기다릴 수 있습니다."
+ ]
+})
+
+langs = ["zh-Hant", "ja", "en", "ko"]
+for i, code in enumerate(langs):
+    out = {k: v[i] for k, v in T.items()}
+    with open(os.path.join(HERE, code + ".json"), "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=1)
+print("wrote", len(T), "keys x", len(langs))
+
+# ---- 对账门禁（build.sh 每次调用）：源码里每个 tr()/trAny() 字面量 key 四张表都得有，缺一个就让构建失败 ----
+import re, glob, sys
+keys = set()
+for path in glob.glob(os.path.join(HERE, "..", "..", "Sources", "Kikishima", "*.swift")):
+    src = open(path, encoding="utf-8").read()
+    for m in re.finditer(r'\btr(?:Any)?\(\s*"((?:[^"\\]|\\.)*)"', src):
+        keys.add(m.group(1).replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\'))
+missing = sorted(k for k in keys if k not in T)
+if missing:
+    print("l10n: 源码里这些 tr() key 还没有译文（四张表全缺）：")
+    for k in missing: print("   ", repr(k))
+    sys.exit(1)
+unused = sorted(k for k in T if k not in keys)
+if unused and "--verbose" in sys.argv:
+    print("l10n: 源码里已不再以字面量使用的 key（可能经变量传入，或已死）：")
+    for k in unused: print("   ", repr(k))
+print("l10n check ok:", len(keys), "literal keys, all translated")

@@ -1,0 +1,264 @@
+// 本地流式转写：macOS 26 SpeechAnalyzer + SpeechTranscriber
+// 整个类在主线程上（start / stop / 重连都由 CaptionState 驱动）；只有 feed() 在音频 IO 线程上跑，它碰的三个字段用锁保护
+import Foundation
+import Speech
+import AVFoundation
+import CoreMedia
+import OSLog
+
+private let logger = Logger(subsystem: "com.kikishima.mac", category: "Transcribe")
+
+/// 转写事件：volatile = 未定稿（会被替换），finalized = 定稿（往 committed 累加）
+enum TranscriptEvent {
+    case volatile(String, timing: ASRResultTiming? = nil)
+    case finalized(String, timing: ASRResultTiming? = nil)
+    case pause
+    case error(String)
+}
+
+@MainActor
+final class TranscribeEngine {
+    static func modelLocaleKey(_ identifier: String) -> String {
+        identifier.replacingOccurrences(of: "-", with: "_").lowercased()
+    }
+
+    static func installedModelLocales() async -> Set<String> {
+        let locales = await SpeechTranscriber.installedLocales
+        return Set(locales.map { modelLocaleKey($0.identifier) })
+    }
+
+    /// Releases this app's locale reservation; macOS decides when assets can be reclaimed.
+    /// Bool failure is logged, never propagated to the language-list deletion.
+    static func releaseModelLocale(_ identifier: String) async -> Bool {
+        guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: identifier)) else {
+            logger.warning("Cannot resolve speech locale for release: \(identifier, privacy: .public)")
+            return false
+        }
+        let released = await AssetInventory.release(reservedLocale: locale)
+        if !released { logger.warning("Speech locale reservation release failed: \(identifier, privacy: .public)") }
+        return released
+    }
+
+    private var analyzer: SpeechAnalyzer?
+    private var transcriber: SpeechTranscriber?
+    // 音频 IO 线程（feed）与主线程（start/stop）同时碰的三个字段：锁保护；nonisolated(unsafe) 让 feed 能从非隔离上下文访问
+    private let lock = NSLock()
+    nonisolated(unsafe) private var inputBuilder: AsyncStream<AnalyzerInput>.Continuation?
+    nonisolated(unsafe) private var analyzerFormat: AVAudioFormat?
+    nonisolated(unsafe) private var converter: AVAudioConverter?
+    nonisolated(unsafe) private var timingTimeline: ASRTimingTimeline?
+    nonisolated(unsafe) private var activityDetector = SpeechActivityDetector()
+    nonisolated(unsafe) private var audioGeneration = 0
+    private var eventHandler: (@MainActor @Sendable (TranscriptEvent) -> Void)?
+    private var acceptingActivity = false
+    private var resultsTask: Task<Void, Never>?
+    /// 模型下载进度（0~1），无需下载时为 nil
+    var onDownloadProgress: ((Double) -> Void)?
+    private var downloadingModelLocale: String?
+
+    /// locale: "en_US" / "ja_JP"
+    /// 代数：每次 start/stop +1；await 之后发现代数变了 = 已被别的 start/stop 接管，只拆自己建的东西
+    private var gen = 0
+    private var draining = false
+
+    func start(localeID: String, onEvent: @escaping @MainActor @Sendable (TranscriptEvent) -> Void) async throws {
+        stop()   // 幂等：上一次没停干净就先清
+        gen += 1
+        let myGen = gen
+        self.eventHandler = onEvent
+        let locale = Locale(identifier: localeID)
+        let transcriber = SpeechTranscriber(
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: [.volatileResults],
+            attributeOptions: []
+        )
+        self.transcriber = transcriber
+
+        // 模型资产：没装则下载（首次要几百 MB，之后秒开）
+        if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+            try Task.checkCancellation()
+            guard gen == myGen else { throw CancellationError() }
+            downloadingModelLocale = localeID
+            CaptionState.shared.modelProgress[localeID] = 0
+            let progress = request.progress
+            let observer = progress.observe(\.fractionCompleted, options: [.new]) { [weak self] p, _ in
+                let v = p.fractionCompleted
+                Task { @MainActor in
+                    guard let self, self.gen == myGen else { return }
+                    let state = CaptionState.shared
+                    if state.modelProgress[localeID] != nil {
+                        state.modelProgress[localeID] = min(0.99, v)
+                    }
+                    self.onDownloadProgress?(v)
+                }
+            }
+            defer {
+                observer.invalidate()
+                if gen == myGen {
+                    CaptionState.shared.modelProgress[localeID] = nil
+                    downloadingModelLocale = nil
+                }
+            }
+            try await request.downloadAndInstall()
+        }
+        await CaptionState.shared.refreshModelInstallation()
+        try Task.checkCancellation()   // 用户在下载期间取消：什么都还没建，直接退出
+        guard gen == myGen else { throw CancellationError() }
+
+        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let fmt = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+        try Task.checkCancellation()
+        guard gen == myGen else { throw CancellationError() }
+        self.analyzer = analyzer
+
+        // bufferingNewest：分析器卡住/挂掉时丢旧音频，而不是无限堆内存（2 小时会议 ~230 MB）
+        let (stream, builder) = AsyncStream<AnalyzerInput>.makeStream(bufferingPolicy: .bufferingNewest(256))
+        let recorder = TranslationTimingRecorder.shared
+        let timeline = recorder.enabled ? ASRTimingTimeline(sessionID: recorder.sessionID, analyzerID: recorder.nextID()) : nil
+        lock.lock(); self.timingTimeline = timeline; self.inputBuilder = builder; self.analyzerFormat = fmt; self.converter = nil; self.audioGeneration = myGen; lock.unlock()
+        try await analyzer.start(inputSequence: stream)
+        if Task.isCancelled || gen != myGen {   // 取消/被接管在 analyzer.start 期间到达：只拆自己建的这套，不碰当前会话的
+            builder.finish()
+            Task { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
+            if gen == myGen { lock.lock(); inputBuilder = nil; analyzerFormat = nil; converter = nil; timingTimeline = nil; lock.unlock(); self.analyzer = nil; self.transcriber = nil }
+            throw CancellationError()
+        }
+
+        acceptingActivity = true
+        resultsTask = Task {
+            do {
+                for try await result in transcriber.results {
+                    guard TranscriptionResultPolicy.accepts(resultGeneration: myGen, currentGeneration: self.gen,
+                                                           draining: self.draining, finished: Task.isCancelled) else { return }
+                    let timing = timeline.map { ASRResultTiming($0.result(start: result.range.start.seconds,
+                        end: CMTimeRangeGetEnd(result.range).seconds, final: result.isFinal,
+                        at: ProcessInfo.processInfo.systemUptime)) }
+                    let text = String(result.text.characters)
+                    if result.isFinal {
+                        onEvent(.finalized(text, timing: timing))
+                    } else {
+                        onEvent(.volatile(text, timing: timing))
+                    }
+                }
+            } catch {
+                // stop() 主动取消不算错误
+                if error is CancellationError || Task.isCancelled || self.gen != myGen { return }
+                onEvent(.error(trAny("转写流中断：%@", error.localizedDescription)))
+            }
+        }
+        logger.info("transcriber started, locale \(localeID)")
+    }
+
+    /// A long enough silence arrived on the audio thread. Only forwarded to the
+    /// caption layer when this session still owns the audio timeline.
+    private func reportPause(generation: Int) {
+        guard acceptingActivity, lock.withLock({ audioGeneration }) == generation else { return }
+        eventHandler?(.pause)
+    }
+
+    /// 音频线程调用：tap 的原始 buffer 转成分析器格式后喂入
+    nonisolated func feed(bufferList: UnsafePointer<AudioBufferList>, sourceFormat: AVAudioFormat) {
+        lock.lock()
+        guard let inputBuilder, let analyzerFormat else { lock.unlock(); return }
+        if converter == nil || converter?.inputFormat != sourceFormat {
+            converter = AVAudioConverter(from: sourceFormat, to: analyzerFormat)
+            converter?.primeMethod = .none
+        }
+        let converter = self.converter
+        let timeline = timingTimeline
+        let feedGeneration = audioGeneration
+        lock.unlock()
+        guard let converter else { return }
+        guard let src = AVAudioPCMBuffer(pcmFormat: sourceFormat, bufferListNoCopy: bufferList, deallocator: nil) else { return }
+        let ratio = analyzerFormat.sampleRate / sourceFormat.sampleRate
+        let capacity = AVAudioFrameCount(Double(src.frameLength) * ratio) + 64
+        guard let dst = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: capacity) else { return }
+        var consumed = false
+        var convErr: NSError?
+        converter.convert(to: dst, error: &convErr) { _, outStatus in
+            if consumed { outStatus.pointee = .noDataNow; return nil }
+            consumed = true
+            outStatus.pointee = .haveData
+            return src
+        }
+        if convErr == nil, dst.frameLength > 0 {
+            let duration = Double(dst.frameLength) / analyzerFormat.sampleRate
+            var pauseGeneration: Int?
+            if let level = SpeechActivityDetector.levelDB(dst) {
+                lock.lock()
+                guard audioGeneration == feedGeneration else { lock.unlock(); return }
+                if activityDetector.process(levelDB: level, duration: duration) == .ended {
+                    pauseGeneration = audioGeneration
+                }
+                lock.unlock()
+            }
+            if let timeline {
+                timeline.feed(duration: duration, at: ProcessInfo.processInfo.systemUptime) {
+                    if case .dropped = inputBuilder.yield(AnalyzerInput(buffer: dst)) { return true }
+                    return false
+                }
+            } else {
+                inputBuilder.yield(AnalyzerInput(buffer: dst))
+            }
+            if let pauseGeneration {
+                Task { @MainActor [weak self] in
+                    self?.reportPause(generation: pauseGeneration)
+                }
+            }
+        }
+    }
+
+    /// End input, accept finalize results, and wait until their consumer has delivered them.
+    func finish() async {
+        let myGen = gen
+        acceptingActivity = false
+        draining = true
+        let builder = lock.withLock {
+            let builder = inputBuilder
+            inputBuilder = nil; converter = nil; analyzerFormat = nil; timingTimeline = nil
+            return builder
+        }
+        builder?.finish()
+        let analyzer = self.analyzer
+        let task = resultsTask
+        do { try await analyzer?.finalizeAndFinishThroughEndOfInput() }
+        catch { task?.cancel() }
+        await task?.value
+        guard gen == myGen else { return }
+        gen += 1
+        draining = false
+        resultsTask = nil; self.analyzer = nil; self.transcriber = nil; self.eventHandler = nil
+    }
+
+    func stop() {
+        acceptingActivity = false
+        if let locale = downloadingModelLocale {
+            CaptionState.shared.modelProgress[locale] = nil
+            downloadingModelLocale = nil
+        }
+        draining = false
+        gen += 1
+        lock.lock()
+        let builder = inputBuilder
+        inputBuilder = nil; converter = nil; analyzerFormat = nil; timingTimeline = nil
+        activityDetector.reset(); audioGeneration = gen
+        lock.unlock()
+        builder?.finish()
+        let analyzer = self.analyzer
+        let task = resultsTask
+        resultsTask = nil
+        // Graceful draining belongs to finish(). Stop revokes result ownership
+        // immediately, including after a drain deadline or an interrupted start.
+        task?.cancel()
+        Task {
+            await analyzer?.cancelAndFinishNow()
+        }
+        self.analyzer = nil
+        self.transcriber = nil
+        self.eventHandler = nil
+    }
+
+    /// 重置转换器（输出设备切换后采样率可能变）
+    nonisolated func resetConverter() { lock.lock(); converter = nil; lock.unlock() }
+}

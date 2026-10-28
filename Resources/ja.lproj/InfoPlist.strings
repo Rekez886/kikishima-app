@@ -1,0 +1,4 @@
+NSAudioCaptureUsageDescription = "会議の音声からリアルタイム字幕を作るため、システム音声の取得が必要です。音声はMac内で文字にし、アップロードしません。";
+NSCalendarsFullAccessUsageDescription = "macOSでは「フルアクセス」と表示されますが、Kikishimaが読み取るのは字幕の準備に必要な会議名、時間、参加者名だけです。カレンダーを変更することはありません。";
+NSSpeechRecognitionUsageDescription = "会議の音声をMac内の音声認識で文字にします。";
+NSScreenCaptureUsageDescription = "「吹き出しモード」をオンにしたときだけ、発言者の位置を知るために会議画面を読み取ります。画面は保存もアップロードもしません。";

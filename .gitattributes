@@ -1,0 +1,2 @@
+# Frozen Chrome extension: keep in tree, exclude from GitHub language stats.
+chrome-extension/** linguist-vendored

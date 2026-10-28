@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Kikishima</string>
+	<key>CFBundleExecutable</key>
+	<string>Kikishima</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.kikishima.mac</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>zh-Hans</string>
+		<string>zh-Hant</string>
+		<string>ja</string>
+		<string>en</string>
+		<string>ko</string>
+	</array>
+	<key>CFBundleName</key>
+	<string>Kikishima</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.44</string>
+	<key>CFBundleVersion</key>
+	<string>202610260217</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>需要捕获系统音频，才能为会议声音生成实时字幕。音频仅在本机转写，不会上传。</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>macOS 将此权限显示为「完全访问」。Kikishima 只读取会议标题、时间和参会者姓名来准备字幕，不会修改你的日历。</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>仅在开启「气泡模式」时需要读取会议窗口画面，用来定位正在发言的人。画面不会保存或上传。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>使用系统本地语音识别把会议音频转成文字。</string>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUPublicEDKey</key>
+	<string>a+AAXYzfqmL3iIxs0geR/Kfum1cKOus9BCVJzJBUprU=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+</dict>
+</plist>
