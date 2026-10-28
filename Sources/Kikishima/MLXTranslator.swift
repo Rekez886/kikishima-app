@@ -84,6 +84,18 @@ final class MLXModelController {
             loadTask = nil
             state = .ready
             UserDefaults.standard.set(true, forKey: "mlxModelReady")
+            // Warm up once, only after the model is ready and only when the packaged
+            // app carries mlx.metallib next to the executable. Silent and background.
+            MLXWarmup.shared.perform = {
+                _ = try await MLXModelController.generate(
+                    container: loaded,
+                    text: MLXWarmup.prompt,
+                    source: MLXWarmup.sourceLanguage,
+                    target: MLXWarmup.targetLanguage,
+                    timeout: MLXWarmup.timeout
+                )
+            }
+            MLXWarmup.shared.scheduleAfterReady()
         } catch {
             loadTask = nil
             state = .failed(error.localizedDescription)
@@ -94,6 +106,16 @@ final class MLXModelController {
     func translate(_ text: String, source: String, target: String, timeout: TimeInterval) async throws -> String {
         try await load()
         guard let container else { throw TranslateFailure.localUnavailable("本机高质量模型没有加载成功") }
+        return try await Self.generate(
+            container: container, text: text, source: source, target: target, timeout: timeout)
+    }
+
+    /// One generation, shared by `translate()` and the one-shot warm-up.
+    ///
+    /// Deliberately `nonisolated`: prompt building, tokenization and decoding must
+    /// not run on the main actor, so the warm-up never touches the main thread.
+    nonisolated static func generate(container: ModelContainer, text: String, source: String,
+                                     target: String, timeout: TimeInterval) async throws -> String {
         let sourceCode = TranslationEnginePolicy.mlxLanguageCode(source)
         let targetCode = TranslationEnginePolicy.mlxLanguageCode(target)
         let session = ChatSession(
