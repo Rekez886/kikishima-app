@@ -25,9 +25,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.44</string>
+	<string>1.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>202610260217</string>
+	<string>202610290059</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>NSAudioCaptureUsageDescription</key>
@@ -38,13 +38,5 @@
 	<string>仅在开启「气泡模式」时需要读取会议窗口画面，用来定位正在发言的人。画面不会保存或上传。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>使用系统本地语音识别把会议音频转成文字。</string>
-	<key>SUAutomaticallyUpdate</key>
-	<false/>
-	<key>SUEnableAutomaticChecks</key>
-	<false/>
-	<key>SUPublicEDKey</key>
-	<string>a+AAXYzfqmL3iIxs0geR/Kfum1cKOus9BCVJzJBUprU=</string>
-	<key>SUScheduledCheckInterval</key>
-	<integer>86400</integer>
 </dict>
 </plist>

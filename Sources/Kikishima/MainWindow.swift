@@ -849,9 +849,9 @@ struct LanguagesView: View {
                 }
             } message: {
                 if state.running || state.starting {
-                    Text(tr("字幕运行中。为避免中断，更新窗口等系统界面会在下次启动 Kikishima 时切换语言。"))
+                    Text(tr("字幕运行中。为避免中断，系统界面会在下次启动 Kikishima 时切换语言。"))
                 } else {
-                    Text(tr("更新窗口等系统界面需要重新启动 Kikishima 才能切换语言。"))
+                    Text(tr("系统界面需要重新启动 Kikishima 才能切换语言。"))
                 }
             }
             Section(tr("常用会议语言")) {
@@ -1128,25 +1128,6 @@ Section(tr("会议总结")) {
         Text(tr("音频不会上传。会议文字和称呼只在本机用于生成会议总结；选择 OpenAI Key 时会直接发送给 OpenAI，不经过 Kikishima。关闭会议总结不会关闭本机会议记录。"))
             .font(.caption)
             .foregroundStyle(KKColor.textSecondary)
-    }
-    }
-
-    @ViewBuilder
-    private var updaterSection: some View {
-Section(tr("更新")) {
-        Toggle(tr("自动检查更新"), isOn: Binding(get: { UpdaterController.shared.automaticallyChecks }, set: { UpdaterController.shared.automaticallyChecks = $0 })).toggleStyle(KKSwitchToggleStyle())
-        Toggle(tr("自动下载并在下次启动时安装"), isOn: Binding(get: { UpdaterController.shared.automaticallyDownloads }, set: { UpdaterController.shared.automaticallyDownloads = $0 })).toggleStyle(KKSwitchToggleStyle())
-            .disabled(!UpdaterController.shared.automaticallyChecks)
-        HStack {
-            Button(tr("检查更新…")) { UpdaterController.shared.checkForUpdates() }
-                .buttonStyle(KKQuietButtonStyle())
-                .disabled(!UpdaterController.shared.canCheck)
-            Spacer()
-            if let d = UpdaterController.shared.lastCheck {
-                Text(tr("上次检查：%@", d.formatted(date: .abbreviated, time: .shortened))).font(.caption).foregroundStyle(KKColor.textSecondary)
-            }
-        }
-        Text(tr("当前版本 %@", Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")).font(.caption).foregroundStyle(KKColor.textTertiary)
     }
     }
 

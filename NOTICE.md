@@ -64,9 +64,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Sparkle (MIT)
-`Vendor/Sparkle.framework` — https://sparkle-project.org (see Vendor/Sparkle-LICENSE.txt).
-
 ## Swift package dependencies (pinned in Package.resolved)
 
 The following Swift package dependencies are pinned in `Package.resolved`. Licence and notice texts are reproduced verbatim from the files at the linked commits; byte-identical texts are referenced by SHA-256.

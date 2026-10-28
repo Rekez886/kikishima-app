@@ -1,12 +1,6 @@
 // swift-tools-version: 6.0
 // SwiftPM 只负责拉三方包并编出可执行文件；打包 / 签名仍在 build.sh。
 import PackageDescription
-import Foundation
-
-// swiftbuild may compile from the package's parent, so framework lookup must
-// not depend on the compiler's working directory.
-let vendorFrameworks = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent().appendingPathComponent("Vendor").path
 
 let package = Package(
     name: "Kikishima",
@@ -39,14 +33,13 @@ let package = Package(
                 .product(name: "MLXLMHFAPI", package: "swift-hf-api-mlx"),
             ],
             path: "Sources/Kikishima",
-            swiftSettings: [.swiftLanguageMode(.v5), .unsafeFlags(["-F", vendorFrameworks])],
+            swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 .linkedFramework("AuthenticationServices"), .linkedFramework("ServiceManagement"),
                 .linkedFramework("SwiftUI"), .linkedFramework("AppKit"), .linkedFramework("Speech"),
                 .linkedFramework("AVFoundation"), .linkedFramework("AudioToolbox"), .linkedFramework("Security"),
                 .linkedFramework("Translation"), .linkedFramework("ScreenCaptureKit"), .linkedFramework("CoreImage"),
                 .linkedFramework("Vision"), .linkedFramework("EventKit"),
-                .unsafeFlags(["-F", vendorFrameworks, "-framework", "Sparkle", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
             ]
         ),
     ]
