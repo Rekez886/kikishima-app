@@ -1,0 +1,412 @@
+[
+  {
+    "id": "audio-capture-failed",
+    "full": "音频仍无法捕获：%@",
+    "category": "错误",
+    "short": {
+      "zh-Hans": "采音失败",
+      "zh-Hant": "收音失敗",
+      "ja": "音声エラー",
+      "en": "Audio error",
+      "ko": "오디오 오류"
+    },
+    "button": {
+      "action": "CaptionBanner.Action.retry",
+      "key": "修复",
+      "text": {
+        "zh-Hans": "修复",
+        "zh-Hant": "修復",
+        "ja": "修復",
+        "en": "Fix",
+        "ko": "수정"
+      }
+    },
+    "notes": "去掉仍及原因 %@",
+    "sourceOnly": false
+  },
+  {
+    "id": "resume-failed",
+    "full": "无法继续：%@",
+    "category": "错误",
+    "short": {
+      "zh-Hans": "无法继续",
+      "zh-Hant": "無法繼續",
+      "ja": "再開不可",
+      "en": "Start failed",
+      "ko": "재개 불가"
+    },
+    "button": {
+      "action": "CaptionBanner.Action.retry",
+      "key": "修复",
+      "text": {
+        "zh-Hans": "修复",
+        "zh-Hant": "修復",
+        "ja": "修復",
+        "en": "Fix",
+        "ko": "수정"
+      }
+    },
+    "notes": "去掉原因 %@",
+    "sourceOnly": false
+  },
+  {
+    "id": "start-failed",
+    "full": "启动失败：%@",
+    "category": "错误",
+    "short": {
+      "zh-Hans": "启动失败",
+      "zh-Hant": "啟動失敗",
+      "ja": "起動失敗",
+      "en": "Start failed",
+      "ko": "시작 실패"
+    },
+    "button": {
+      "action": "CaptionBanner.Action.retry",
+      "key": "修复",
+      "text": {
+        "zh-Hans": "修复",
+        "zh-Hant": "修復",
+        "ja": "修復",
+        "en": "Fix",
+        "ko": "수정"
+      }
+    },
+    "notes": "去掉原因 %@",
+    "sourceOnly": false
+  },
+  {
+    "id": "device-change-capture-failed",
+    "full": "输出设备切换后无法继续捕获音频：%@",
+    "category": "错误",
+    "short": {
+      "zh-Hans": "采音失败",
+      "zh-Hant": "收音失敗",
+      "ja": "音声エラー",
+      "en": "Audio error",
+      "ko": "오디오 오류"
+    },
+    "button": {
+      "action": "CaptionBanner.Action.retry",
+      "key": "修复",
+      "text": {
+        "zh-Hans": "修复",
+        "zh-Hant": "修復",
+        "ja": "修復",
+        "en": "Fix",
+        "ko": "수정"
+      }
+    },
+    "notes": "去掉输出设备切换背景及原因 %@",
+    "sourceOnly": false
+  },
+  {
+    "id": "engine-repeated-interruption",
+    "full": "转写引擎反复中断：%@",
+    "category": "错误",
+    "short": {
+      "zh-Hans": "字幕中断",
+      "zh-Hant": "字幕中斷",
+      "ja": "字幕停止",
+      "en": "Stopped",
+      "ko": "자막 중단"
+    },
+    "button": {
+      "action": "CaptionBanner.Action.retry",
+      "key": "修复",
+      "text": {
+        "zh-Hans": "修复",
+        "zh-Hant": "修復",
+        "ja": "修復",
+        "en": "Fix",
+        "ko": "수정"
+      }
+    },
+    "notes": "去掉引擎解释、反复次数及原因 %@",
+    "sourceOnly": false
+  },
+  {
+    "id": "engine-interruption",
+    "full": "转写引擎中断：%@",
+    "category": "错误",
+    "short": {
+      "zh-Hans": "字幕中断",
+      "zh-Hant": "字幕中斷",
+      "ja": "字幕停止",
+      "en": "Stopped",
+      "ko": "자막 중단"
+    },
+    "button": {
+      "action": "CaptionBanner.Action.retry",
+      "key": "修复",
+      "text": {
+        "zh-Hans": "修复",
+        "zh-Hant": "修復",
+        "ja": "修復",
+        "en": "Fix",
+        "ko": "수정"
+      }
+    },
+    "notes": "去掉引擎解释及原因 %@",
+    "sourceOnly": false
+  },
+  {
+    "id": "finishing-captions",
+    "full": "已停止采音，正在完成最后一句…",
+    "category": "过程",
+    "short": {
+      "zh-Hans": "收尾中",
+      "zh-Hant": "收尾中",
+      "ja": "仕上げ中",
+      "en": "Finishing",
+      "ko": "마무리 중"
+    },
+    "button": null,
+    "notes": "去掉已停止采音及最后一句的细节",
+    "sourceOnly": false
+  },
+  {
+    "id": "previous-start-finishing",
+    "full": "上一次启动还在收尾，请稍后再试",
+    "category": "过程",
+    "short": {
+      "zh-Hans": "收尾中",
+      "zh-Hant": "收尾中",
+      "ja": "仕上げ中",
+      "en": "Finishing",
+      "ko": "마무리 중"
+    },
+    "button": null,
+    "notes": "去掉上一次启动背景和请稍后再试",
+    "sourceOnly": false
+  },
+  {
+    "id": "model-download",
+    "full": "下载转写模型 %@%",
+    "category": "过程",
+    "short": {
+      "zh-Hans": "下载中 %@%",
+      "zh-Hant": "下載中 %@%",
+      "ja": "ダウンロード %@%",
+      "en": "Download %@%",
+      "ko": "다운로드 중 %@%"
+    },
+    "button": null,
+    "notes": "去掉转写模型对象及 %@% 进度数字",
+    "sourceOnly": false
+  },
+  {
+    "id": "output-device-changed",
+    "full": "输出设备已切换，继续字幕",
+    "category": "过程",
+    "short": {
+      "zh-Hans": "设备已切换",
+      "zh-Hant": "裝置已切換",
+      "ja": "出力切替済み",
+      "en": "Output switched",
+      "ko": "출력 전환됨"
+    },
+    "button": null,
+    "notes": "去掉输出设备对象及继续字幕解释",
+    "sourceOnly": false
+  },
+  {
+    "id": "record-saved",
+    "full": "已停止 · 记录已存 %@",
+    "category": "过程",
+    "short": {
+      "zh-Hans": "已保存",
+      "zh-Hant": "已儲存",
+      "ja": "保存済み",
+      "en": "Saved",
+      "ko": "저장 완료"
+    },
+    "button": null,
+    "notes": "去掉已停止、记录对象及 %@ 文件名",
+    "sourceOnly": false
+  },
+  {
+    "id": "record-save-failed",
+    "full": "已停止 · 记录保存失败: %@",
+    "category": "错误",
+    "short": {
+      "zh-Hans": "保存失败",
+      "zh-Hant": "儲存失敗",
+      "ja": "保存失敗",
+      "en": "Save failed",
+      "ko": "저장 실패"
+    },
+    "button": null,
+    "notes": "去掉已停止、记录对象及原因 %@；缺按钮/缺动作：保存失败分支 CaptionState.swift:2024–2027 只有 status，无 CaptionBanner.Action。saveTranscript 是 private（2146）；调用点1999/2135，无用户重试保存入口。现有 App.swift:438–441 打开记录文件夹可作未来候选入口，但不在该状态上、无 action 枚举，不能重试失败写入。本轮 button=null；不拿 retry 冒充重试保存（1235–1252 为采音/转写恢复）",
+    "sourceOnly": false
+  },
+  {
+    "id": "no-frame",
+    "full": "没有可存的帧（气泡模式开着且会议窗口在吗？）",
+    "category": "警告",
+    "short": {
+      "zh-Hans": "无可存画面",
+      "zh-Hant": "無可存畫面",
+      "ja": "保存画像なし",
+      "en": "No frame to save",
+      "ko": "저장할 화면 없음"
+    },
+    "button": null,
+    "notes": "去掉括号内气泡模式与会议窗口检查原因",
+    "sourceOnly": false
+  },
+  {
+    "id": "paused",
+    "full": "已暂停 · 声音不再记录",
+    "category": "状态",
+    "short": {
+      "zh-Hans": "已暂停",
+      "zh-Hant": "已暫停",
+      "ja": "一時停止中",
+      "en": "Paused",
+      "ko": "일시 정지"
+    },
+    "button": null,
+    "notes": "去掉 · 声音不再记录解释尾巴",
+    "sourceOnly": false
+  },
+  {
+    "id": "rate-limited",
+    "full": "请求太频繁，稍等片刻",
+    "category": "警告",
+    "short": {
+      "zh-Hans": "请求过频",
+      "zh-Hant": "請求過頻",
+      "ja": "リクエスト過多",
+      "en": "Rate limited",
+      "ko": "요청 과다"
+    },
+    "button": null,
+    "notes": "去掉稍等片刻指令",
+    "sourceOnly": false
+  },
+  {
+    "id": "offline",
+    "full": "离线，正在重连",
+    "category": "警告",
+    "short": {
+      "zh-Hans": "重连中",
+      "zh-Hant": "重連中",
+      "ja": "再接続中",
+      "en": "Reconnecting",
+      "ko": "재연결 중"
+    },
+    "button": null,
+    "notes": "去掉离线背景，保留正在重连的状态；r9 离线短句重新提案",
+    "sourceOnly": false
+  },
+  {
+    "id": "recording-permission",
+    "full": "没有「系统录音」权限，听不到会议声音。系统设置 › 隐私与安全性 › 屏幕录制与系统录音 里允许 Kikishima。",
+    "category": "错误",
+    "short": {
+      "zh-Hans": "缺录音权限",
+      "zh-Hant": "缺錄音權限",
+      "ja": "録音未許可",
+      "en": "No access",
+      "ko": "권한 없음"
+    },
+    "button": {
+      "action": "CaptionBanner.Action.openSettings",
+      "key": "修复",
+      "text": {
+        "zh-Hans": "修复",
+        "zh-Hant": "修復",
+        "ja": "修復",
+        "en": "Fix",
+        "ko": "수정"
+      }
+    },
+    "notes": "去掉听不到会议声音结果和整段设置路径；r9 需要录音权限重新提案",
+    "sourceOnly": false
+  },
+  {
+    "id": "switching",
+    "full": "正在切换为%@…",
+    "category": "过程",
+    "short": {
+      "zh-Hans": "切换中",
+      "zh-Hant": "切換中",
+      "ja": "切替中",
+      "en": "Switching",
+      "ko": "전환 중"
+    },
+    "button": null,
+    "notes": "去掉目标 %@ 和省略号",
+    "sourceOnly": false
+  },
+  {
+    "id": "speech-reconnecting",
+    "full": "转写重连中…",
+    "category": "过程",
+    "short": {
+      "zh-Hans": "重连中",
+      "zh-Hant": "重連中",
+      "ja": "再接続中",
+      "en": "Reconnecting",
+      "ko": "재연결 중"
+    },
+    "button": null,
+    "notes": "去掉省略号",
+    "sourceOnly": false
+  },
+  {
+    "id": "snapshot-saved",
+    "full": "快照已存 %@",
+    "category": "过程",
+    "short": {
+      "zh-Hans": "已保存",
+      "zh-Hant": "已儲存",
+      "ja": "保存済み",
+      "en": "Saved",
+      "ko": "저장 완료"
+    },
+    "button": null,
+    "notes": "去掉快照对象及 %@ 文件名",
+    "sourceOnly": false
+  },
+  {
+    "id": "audio-recovering",
+    "full": "音频中断，正在恢复",
+    "category": "警告",
+    "short": {
+      "zh-Hans": "音频恢复中",
+      "zh-Hant": "音訊恢復中",
+      "ja": "音声復旧中",
+      "en": "Audio recovering",
+      "ko": "오디오 복구 중"
+    },
+    "button": null,
+    "notes": "去掉音频中断背景，保留恢复中；r9 音频中断，恢复中重新提案",
+    "sourceOnly": false
+  },
+  {
+    "id": "device-missing",
+    "full": "没有输出设备，听不到会议声音",
+    "category": "错误",
+    "short": {
+      "zh-Hans": "无输出设备",
+      "zh-Hant": "無輸出裝置",
+      "ja": "出力なし",
+      "en": "No output",
+      "ko": "출력 없음"
+    },
+    "button": {
+      "action": "CaptionBanner.Action.openSettings",
+      "key": "修复",
+      "text": {
+        "zh-Hans": "修复",
+        "zh-Hant": "修復",
+        "ja": "修復",
+        "en": "Fix",
+        "ko": "수정"
+      }
+    },
+    "notes": "去掉听不到会议声音结果；r9 没有输出设备重新提案",
+    "sourceOnly": false
+  }
+]
