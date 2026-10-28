@@ -42,6 +42,8 @@ does not call.
   Macs, about 6.6 GB on 24 GB or larger Macs).
 - Optional: an OpenAI API key.
 
+New versions are available from GitHub Releases; the app does not update automatically.
+
 ## Build
 
 ```bash

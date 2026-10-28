@@ -465,7 +465,6 @@ struct MenuContent: View {
 
             AccessibleMenuCommand(tr("打开 Kikishima")) { AppDelegate.enter() }
             AccessibleMenuCommand(tr("设置…")) { AppDelegate.enter(section: .settings) }
-            AccessibleMenuCommand(tr("检查更新…")) { UpdaterController.shared.checkForUpdates() }
             AccessibleMenuCommand(tr("退出"), activatesApp: false) {
                 state.stop()
                 NSApplication.shared.terminate(nil)

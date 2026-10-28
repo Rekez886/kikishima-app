@@ -27,7 +27,6 @@ if ShootSimulation.runIfRequested() { exit(0) }
 }
 #endif
 
-// Sparkle follows the app's AppleLanguages preference, while Kikishima's own UI follows uiLanguage.
 // Existing installs need one early relaunch after the two preferences are synchronized.
 _ = AppLanguagePreference.processLanguage
 if let selectedLanguage = AppLanguagePreference.synchronizeSavedLanguage(),
