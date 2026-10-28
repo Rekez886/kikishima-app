@@ -2,6 +2,22 @@ import Foundation
 
 private enum FakeCalendarError: Error { case unavailable }
 
+private actor FakeCalendarGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        for waiter in waiters { waiter.resume() }
+        waiters.removeAll()
+    }
+}
+
 private actor FakeCalendarProvider: CalendarProviding {
     nonisolated let source: CalendarSource
     private var events: [CalendarEventCandidate]
@@ -9,8 +25,8 @@ private actor FakeCalendarProvider: CalendarProviding {
     private let failWhenIntervalLongerThan: TimeInterval?
     private let authorization: CalendarProviderAuthorization
     private let requestedAuthorization: CalendarProviderAuthorization
-    private let requestDelayNanoseconds: UInt64
-    private let fetchDelayNanoseconds: UInt64
+    private let requestGate: FakeCalendarGate?
+    private let fetchGate: FakeCalendarGate?
     private var fetchCount = 0
 
     init(
@@ -20,8 +36,8 @@ private actor FakeCalendarProvider: CalendarProviding {
         failWhenIntervalLongerThan: TimeInterval? = nil,
         authorization: CalendarProviderAuthorization = .authorized,
         requestedAuthorization: CalendarProviderAuthorization? = nil,
-        requestDelayNanoseconds: UInt64 = 0,
-        fetchDelayNanoseconds: UInt64 = 0
+        requestGate: FakeCalendarGate? = nil,
+        fetchGate: FakeCalendarGate? = nil
     ) {
         self.source = source
         self.events = events
@@ -29,23 +45,19 @@ private actor FakeCalendarProvider: CalendarProviding {
         self.failWhenIntervalLongerThan = failWhenIntervalLongerThan
         self.authorization = authorization
         self.requestedAuthorization = requestedAuthorization ?? authorization
-        self.requestDelayNanoseconds = requestDelayNanoseconds
-        self.fetchDelayNanoseconds = fetchDelayNanoseconds
+        self.requestGate = requestGate
+        self.fetchGate = fetchGate
     }
 
     func setEvents(_ events: [CalendarEventCandidate]) { self.events = events }
     func authorizationStatus() async -> CalendarProviderAuthorization { authorization }
     func requestAccess() async -> CalendarProviderAuthorization {
-        if requestDelayNanoseconds > 0 {
-            try? await Task.sleep(nanoseconds: requestDelayNanoseconds)
-        }
+        await requestGate?.wait()
         return requestedAuthorization
     }
     func fetchEvents(in interval: DateInterval) async throws -> [CalendarEventCandidate] {
         fetchCount += 1
-        if fetchDelayNanoseconds > 0 {
-            try? await Task.sleep(nanoseconds: fetchDelayNanoseconds)
-        }
+        await fetchGate?.wait()
         if shouldFail { throw FakeCalendarError.unavailable }
         if let failWhenIntervalLongerThan,
            interval.duration > failWhenIntervalLongerThan {
@@ -148,8 +160,18 @@ private func testProviderChangesDebounceToOneForcedRefresh() async {
     await coordinator.refresh(force: true)
     coordinator.providerDidChange()
     coordinator.providerDidChange()
-    try? await Task.sleep(nanoseconds: 30_000_000)
-    let fetchCount = await provider.numberOfFetches()
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    var fetchCount = await provider.numberOfFetches()
+    while fetchCount < 2 && ContinuousClock.now < deadline {
+        try? await Task.sleep(nanoseconds: 5_000_000)
+        fetchCount = await provider.numberOfFetches()
+    }
+    precondition(fetchCount >= 2,
+                 "Timed out after 5 seconds waiting for the debounced refresh; fetch count: \(fetchCount)")
+
+    // Give a duplicate refresh time to surface after the expected refresh starts.
+    try? await Task.sleep(nanoseconds: 200_000_000)
+    fetchCount = await provider.numberOfFetches()
     precondition(fetchCount == 2, "A burst of provider changes must trigger one refresh")
 }
 
@@ -161,19 +183,23 @@ private func testPresentationStates() async {
     )
     precondition(notDetermined.presentationState == .needsPermission)
 
+    let fetchGate = FakeCalendarGate()
     let loading = CalendarCoordinator(
         providers: [FakeCalendarProvider(
             source: .macOS,
             events: [],
-            fetchDelayNanoseconds: 30_000_000
+            fetchGate: fetchGate
         )],
         now: { fixedNow }
     )
     let loadingTask = Task { await loading.refresh(force: true) }
-    for _ in 0..<20 where !loading.isRefreshing {
-        await Task.yield()
+    let loadingDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while !loading.isRefreshing && ContinuousClock.now < loadingDeadline {
+        try? await Task.sleep(nanoseconds: 5_000_000)
     }
-    precondition(loading.presentationState == .loading)
+    precondition(loading.presentationState == .loading,
+                 "Timed out after 5 seconds waiting for the refresh to publish loading")
+    await fetchGate.open()
     await loadingTask.value
 
     let denied = CalendarCoordinator(
@@ -238,20 +264,23 @@ private func testRefreshDoesNotEraseRecoverableAccessFailure() async {
 
 @MainActor
 private func testAccessRequestPublishesProgress() async {
+    let requestGate = FakeCalendarGate()
     let provider = FakeCalendarProvider(
         source: .macOS,
         events: [],
         authorization: .notDetermined,
         requestedAuthorization: .authorized,
-        requestDelayNanoseconds: 30_000_000
+        requestGate: requestGate
     )
     let coordinator = CalendarCoordinator(providers: [provider], now: { fixedNow })
 
     let request = Task { await coordinator.requestMacAccess() }
-    for _ in 0..<20 where !coordinator.isRequestingMacAccess {
-        await Task.yield()
+    let requestDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while !coordinator.isRequestingMacAccess && ContinuousClock.now < requestDeadline {
+        try? await Task.sleep(nanoseconds: 5_000_000)
     }
     precondition(coordinator.isRequestingMacAccess, "Clicking Calendar access must immediately publish visible progress")
+    await requestGate.open()
     _ = await request.value
     precondition(!coordinator.isRequestingMacAccess)
 }
