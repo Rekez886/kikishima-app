@@ -87,6 +87,10 @@ mkdir -p "$APP/Contents/Resources/l10n" && cp Resources/l10n/*.json "$APP/Conten
 cp -R Resources/*.lproj "$APP/Contents/Resources/"   # InfoPlist.strings：系统权限弹窗文案跟随系统语言
 if [ -n "$DEV_ID" ] && security find-identity -v -p codesigning | grep -qF "$DEV_ID"; then
   # Maintainers can pass SIGN_ID to use their own Developer ID certificate.
+  # mlx.metallib is a non-Mach-O file in Contents/MacOS; codesign requires nested items to be signed first.
+  if [ -f "$APP/Contents/MacOS/mlx.metallib" ]; then
+    codesign --force --timestamp --sign "$DEV_ID" "$APP/Contents/MacOS/mlx.metallib"
+  fi
   codesign --force --options runtime --timestamp --entitlements Resources/Kikishima.entitlements --sign "$DEV_ID" "$APP"
   echo "SIGNED: Developer ID"
 else
