@@ -15,6 +15,13 @@ LOCAL_PATTERNS = [
     # r"your-private-domain\.example",
 ]
 
+# The released binary contains the build machine path of the upstream prebuilt
+# Rust tokenizer. scripts/verify-release.sh has to name that path literally.
+# The literal is split here so this audit script does not flag its own source;
+# the exemption below still covers only that one file and that one path.
+VERIFY_RELEASE_FILE = "scripts/verify-release.sh"
+VERIFY_RELEASE_EXEMPT_PATH = "/Users/" + "runner/.cargo"
+
 PATTERNS = {
     # Exempt only the documented fixture user names example and example2.
     "local user path": re.compile(r"/(?:Users|home)/(?!example2?(?![A-Za-z0-9._-]))[A-Za-z0-9._-]+"),
@@ -50,7 +57,13 @@ def main() -> int:
             continue
         for line_no, line in enumerate(text.splitlines(), 1):
             for label, pattern in PATTERNS.items():
-                if pattern.search(line):
+                candidate = line
+                if name == VERIFY_RELEASE_FILE and label == "local user path":
+                    # Only this file and only this literal are exempt. Removing
+                    # the literal keeps any other user path on the same line
+                    # visible to the pattern below.
+                    candidate = candidate.replace(VERIFY_RELEASE_EXEMPT_PATH, "")
+                if pattern.search(candidate):
                     problems.append(f"{name}:{line_no}: {label}")
             for pattern in LOCAL_PATTERNS:
                 if re.search(pattern, line, re.IGNORECASE):
