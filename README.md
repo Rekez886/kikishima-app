@@ -42,7 +42,26 @@ does not call.
   Macs, about 6.6 GB on 24 GB or larger Macs).
 - Optional: an OpenAI API key.
 
-New versions are available from GitHub Releases; the app does not update automatically.
+## Download
+
+Download the latest release from
+[GitHub Releases](https://github.com/Rekez886/kikishima-app/releases/latest).
+The DMG and the app inside are signed with Developer ID and notarized by Apple,
+so they can be opened normally. The First launch steps below apply only to
+self-built versions.
+
+Checksums (SHA-256) are listed on the Release page.
+
+```bash
+shasum -a 256 Kikishima-<version>.dmg
+spctl -a -t open --context context:primary-signature -v Kikishima-<version>.dmg
+```
+
+The `spctl` command should report `accepted` and
+`source=Notarized Developer ID`.
+
+New versions are available from GitHub Releases; the app does not update
+automatically.
 
 ## Build
 
@@ -56,23 +75,32 @@ for GitHub credentials; the cause has not been confirmed. If it stops at
 "Downloading binary artifact", run `swift package --disable-keychain resolve`
 first, then `./build.sh`.
 
-`build.sh` compiles the Swift package, copies resources, and ad-hoc signs the
-app by default. To sign with your own Developer ID certificate, pass it
-explicitly:
+### Signing your own build
+
+`build.sh` compiles the Swift package, copies resources, and signs the app:
+
+- **Without `SIGN_ID`** it signs ad-hoc and prints a warning. This is meant for
+  local development; the result is not notarized and Gatekeeper blocks it on
+  first open.
+- **With `SIGN_ID`** it signs with that Developer ID Application identity using
+  hardened runtime and a secure timestamp. If the identity is not found in your
+  keychain, the build stops with an error instead of falling back to ad-hoc.
 
 ```bash
 SIGN_ID="Developer ID Application: Your Name (TEAMID)" ./build.sh
 ```
 
-**First launch:** The default build is ad-hoc signed and not notarized; expect
-Gatekeeper to block the first open (`spctl` reports `rejected` for this build).
+The build script does not notarize the app. A Developer ID signed build that has
+not been notarized is still rejected by Gatekeeper (`spctl` reports `rejected`
+and `source=Unnotarized Developer ID`). The GitHub Release DMG is notarized.
+
+### First launch of an ad-hoc build
+
 After the failed open attempt, follow [Apple's instructions](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac):
 System Settings > Privacy & Security > Security > Open Anyway (available for
 about an hour after the attempt), then enter your login password.
 Apple's page does not name a macOS version, and this project has not checked
-the exact dialogs on macOS 27 or 26. Only open software you trust. Building
-from source and signing with your own Developer ID certificate avoids the
-default ad-hoc signature; this build script does not notarize the app.
+the exact dialogs on macOS 27 or 26. Only open software you trust.
 
 ## Translation engines
 
