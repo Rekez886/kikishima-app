@@ -113,7 +113,7 @@ printf 'CFBundleVersion=%s\n' "$BUILD_NUM"
 
 TAG="v$VERSION"
 HEAD_SHA="$(git -C "$ROOT" rev-parse -q --verify HEAD 2>/dev/null || true)"
-TAG_SHA="$(git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" 2>/dev/null || true)"
+TAG_SHA="$(git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
 if [ -z "$TAG_SHA" ]; then
   printf 'TAG=%s absent (not required; this script never creates tags)\n' "$TAG"
 elif [ "$TAG_SHA" = "$HEAD_SHA" ]; then
@@ -177,6 +177,20 @@ if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
   exit 2
 fi
 printf 'HEAD=%s\n' "$HEAD_SHA"
+
+# dist/ is ignored by git, so the clean check above cannot see leftovers from an
+# earlier run. Refuse to overwrite them instead of mixing two runs' artifacts.
+EXISTING=""
+for candidate in "$ROOT/dist/Kikishima-$VERSION.dmg" "$ROOT/dist/build-info.txt" "$ROOT/dist/notary"; do
+  if [ -e "$candidate" ]; then
+    printf 'ERROR: previous output already exists: %s\n' "$candidate" >&2
+    EXISTING=1
+  fi
+done
+if [ -n "$EXISTING" ]; then
+  printf 'ERROR: move the previous dist artifacts away before starting a new run\n' >&2
+  exit 2
+fi
 
 IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
 case "$IDENTITIES" in
