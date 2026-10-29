@@ -244,7 +244,7 @@ if [ "$TEAM" != "$EXPECTED_TEAM_ID" ]; then
   printf 'ERROR: TeamIdentifier %s does not match expected %s\n' "${TEAM:-none}" "$EXPECTED_TEAM_ID" >&2
   exit 4
 fi
-FLAGS="$(printf '%s\n' "$SIGINFO" | sed -n 's/^flags=//p')"
+FLAGS="$(printf '%s\n' "$SIGINFO" | sed -n 's/^CodeDirectory .*flags=\([^ ]*\).*/\1/p')"
 FLAGS="${FLAGS%%$'\n'*}"
 case "$FLAGS" in
   *runtime*) ;;
@@ -280,10 +280,12 @@ printf 'DMG: %s\n' "$DMG"
 # --- notarization -----------------------------------------------------------
 mkdir -p "$ROOT/dist/notary"
 SUBMIT_JSON="$ROOT/dist/notary/submit.json"
+SUBMIT_STDERR="$ROOT/dist/notary/submit.stderr.txt"
 SUB_ID=""
 STATUS=""
 NOTARY_RC=0
-if ! run xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json >"$SUBMIT_JSON" 2>&1; then
+# Keep stderr out of the file we json-parse: notarytool writes progress there.
+if ! run xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json >"$SUBMIT_JSON" 2>"$SUBMIT_STDERR"; then
   NOTARY_RC=1
 fi
 
@@ -295,11 +297,33 @@ import sys
 path, field = sys.argv[1], sys.argv[2]
 try:
     with open(path, encoding="utf-8", errors="replace") as handle:
-        data = json.load(handle)
+        text = handle.read()
+except OSError:
+    text = ""
+
+data = None
+try:
+    whole = json.loads(text)
+    if isinstance(whole, dict):
+        data = whole
 except Exception:
-    print("")
-    raise SystemExit(0)
-value = data.get(field, "") if isinstance(data, dict) else ""
+    data = None
+
+# notarytool may add progress or warning lines; scan from the end for a JSON object.
+if data is None:
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            candidate = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(candidate, dict):
+            data = candidate
+            break
+
+value = data.get(field, "") if data else ""
 print(value if isinstance(value, str) else "")
 PY
 }
@@ -313,7 +337,7 @@ if [ "$NOTARY_RC" -ne 0 ] || [ "$STATUS" != "Accepted" ]; then
     run xcrun notarytool log "$SUB_ID" --keychain-profile "$NOTARY_PROFILE" "$ROOT/dist/notary/log.json" >/dev/null 2>&1 || true
     printf 'ERROR: notarization was not accepted; see %s/dist/notary/log.json\n' "$ROOT" >&2
   else
-    printf 'ERROR: notarytool submit returned no submission id; see %s/dist/notary/submit.json\n' "$ROOT" >&2
+    printf 'ERROR: notarytool submit returned no submission id; see %s/dist/notary/submit.json and submit.stderr.txt\n' "$ROOT" >&2
   fi
   exit 6
 fi

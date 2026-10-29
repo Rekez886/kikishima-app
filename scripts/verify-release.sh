@@ -230,7 +230,7 @@ if [ "$RC" -ne 0 ]; then
   OK=1
 fi
 case "$OUT" in
-  *accepted*) ;;
+  *": accepted"*) ;;
   *) OK=1 ;;
 esac
 case "$OUT" in
@@ -348,7 +348,7 @@ else
   LEAF="${LEAF%%$'\n'*}"
   TEAM="$(printf '%s\n' "$SIGINFO" | sed -n 's/^TeamIdentifier=//p')"
   TEAM="${TEAM%%$'\n'*}"
-  FLAGS="$(printf '%s\n' "$SIGINFO" | sed -n 's/^flags=//p')"
+  FLAGS="$(printf '%s\n' "$SIGINFO" | sed -n 's/^CodeDirectory .*flags=\([^ ]*\).*/\1/p')"
   FLAGS="${FLAGS%%$'\n'*}"
   case "$LEAF" in
     "Developer ID Application:"*) ;;
@@ -372,7 +372,7 @@ else
     OK=1
   fi
   case "$OUT" in
-    *accepted*) ;;
+    *": accepted"*) ;;
     *) OK=1 ;;
   esac
   case "$OUT" in
