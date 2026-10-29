@@ -1,6 +1,6 @@
 #!/bin/bash
 # 编译 + 打包 Kikishima.app
-# 签名：设置 SIGN_ID 时用本机 Developer ID；没有证书时用 ad-hoc 签名方便本机开发。
+# 签名：设置 SIGN_ID 时须找到对应身份；未设置时使用 ad-hoc 签名方便本机开发。
 set -euo pipefail
 cd "$(dirname "$0")"
 SANDBOX=false
@@ -18,6 +18,18 @@ if $SANDBOX; then
   SCRATCH=.build-sandbox
 fi
 DEV_ID="${SIGN_ID:-}"
+if [ -n "$DEV_ID" ]; then
+  if ! IDENTITIES="$(security find-identity -v -p codesigning)"; then
+    echo "ERROR: unable to look up code signing identities" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$IDENTITIES" | grep -F -- "$DEV_ID" >/dev/null; then
+    echo "ERROR: requested code signing identity not found" >&2
+    exit 1
+  fi
+else
+  echo "WARNING: SIGN_ID is not set; using ad-hoc signing for local development" >&2
+fi
 rm -rf "$BUILD_DIR"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 if $SANDBOX; then
@@ -85,7 +97,7 @@ python3 Resources/l10n/gen.py --check
 for L in zh-Hant ja en ko; do [ -s "Resources/l10n/$L.json" ] || { echo "missing l10n table: $L.json"; exit 1; }; done
 mkdir -p "$APP/Contents/Resources/l10n" && cp Resources/l10n/*.json "$APP/Contents/Resources/l10n/"
 cp -R Resources/*.lproj "$APP/Contents/Resources/"   # InfoPlist.strings：系统权限弹窗文案跟随系统语言
-if [ -n "$DEV_ID" ] && security find-identity -v -p codesigning | grep -qF "$DEV_ID"; then
+if [ -n "$DEV_ID" ]; then
   # Maintainers can pass SIGN_ID to use their own Developer ID certificate.
   # mlx.metallib is a non-Mach-O file in Contents/MacOS; codesign requires nested items to be signed first.
   if [ -f "$APP/Contents/MacOS/mlx.metallib" ]; then
@@ -94,7 +106,7 @@ if [ -n "$DEV_ID" ] && security find-identity -v -p codesigning | grep -qF "$DEV
   codesign --force --options runtime --timestamp --entitlements Resources/Kikishima.entitlements --sign "$DEV_ID" "$APP"
   echo "SIGNED: Developer ID"
 else
-  # No local certificate: ad-hoc sign so the app can run for development.
+  # No SIGN_ID: ad-hoc sign so the app can run for development.
   codesign --force --deep --sign - "$APP"
   echo "SIGNED: ad-hoc"
 fi
