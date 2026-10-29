@@ -394,7 +394,7 @@ fi
 end_item
 
 # --- 7. app contents --------------------------------------------------------
-begin_item 07 app-contents "app contents" "PlistBuddy CFBundleShortVersionString; autoupdate key scan; Sparkle framework and bundle checks; mlx.metallib" "version matches argument; no autoupdate key; no Sparkle framework; no Pow_Pow.bundle or swift-crypto_Crypto.bundle; mlx.metallib present" 1
+begin_item 07 app-contents "app contents" "PlistBuddy CFBundleShortVersionString; autoupdate key scan; Sparkle framework and bundle checks; codesign verification of mlx.metallib" "version matches argument; no autoupdate key; no Sparkle framework; no Pow_Pow.bundle or swift-crypto_Crypto.bundle; mlx.metallib present and signed by Developer ID (verify exit 0, leaf Authority starts with 'Developer ID Application:', TeamIdentifier=$EXPECTED_TEAM_ID, Timestamp present)" 1
 if [ "$MOUNTED" -ne 1 ]; then
   rec "skipped: the dmg is not mounted"
   measured "mount unavailable"
@@ -432,11 +432,40 @@ else
   fi
   if [ -f "$APP/Contents/MacOS/mlx.metallib" ]; then
     rec "mlx.metallib present ($(stat -f%z "$APP/Contents/MacOS/mlx.metallib") bytes)"
+    ML_PATH="$APP/Contents/MacOS/mlx.metallib"
+    if ML_OUT="$(codesign --verify --strict --verbose=2 "$ML_PATH" 2>&1)"; then
+      ML_RC=0
+    else
+      ML_RC=$?
+    fi
+    rec "metallib codesign --verify: exit=$ML_RC"
+    rec "$ML_OUT"
+    if [ "$ML_RC" -ne 0 ]; then
+      OK=1
+    fi
+    ML_SIGINFO="$(codesign -dvv "$ML_PATH" 2>&1 || true)"
+    rec "metallib codesign -dvv:"
+    rec "$ML_SIGINFO"
+    ML_LEAF="$(printf '%s\n' "$ML_SIGINFO" | sed -n 's/^Authority=//p')"
+    ML_LEAF="${ML_LEAF%%$'\n'*}"
+    ML_TEAM="$(printf '%s\n' "$ML_SIGINFO" | sed -n 's/^TeamIdentifier=//p')"
+    ML_TEAM="${ML_TEAM%%$'\n'*}"
+    case "$ML_LEAF" in
+      "Developer ID Application:"*) ;;
+      *) OK=1 ;;
+    esac
+    if [ "$ML_TEAM" != "$EXPECTED_TEAM_ID" ]; then
+      OK=1
+    fi
+    case "$ML_SIGINFO" in
+      *"Timestamp="*) ;;
+      *) OK=1 ;;
+    esac
   else
     rec "mlx.metallib missing"
     OK=1
   fi
-  measured "version=$SHORT"
+  measured "version=$SHORT; metallib_authority=${ML_LEAF:-none}; metallib_team=${ML_TEAM:-none}"
   if [ "$OK" -eq 0 ]; then
     set_result pass
   fi
