@@ -33,12 +33,15 @@ check('if self.meetingSummaryGeneration == generation' in retry,
       'retry completion must retain its summary ownership guard')
 # Both real completion paths must still guard translation ownership.
 request = source.split('inflight += 1', 1)[1]
-check('TranslationCompletionPolicy.remainingInflight(inflight, requestGeneration: gen, currentGeneration: sessionGen)' in request,
-      'local translation completion must use the tested generation policy')
+check('TranslationCompletionPolicy.remainingInflight(' in request
+      and 'requestGeneration: gen' in request
+      and 'currentGeneration: self.sessionGen' in request,
+      'translation completion must use the tested generation policy')
 check('guard let self, gen == self.sessionGen, self.activeTranslationAttempts[id] == attempt else { return }' in request,
       'remote completion must verify generation AND attempt ownership')
 check('self.activeTranslationAttempts.removeValue(forKey: id)' in request
-      and 'self.inflight = max(0, self.inflight - 1)' in request,
+      and ('self.inflight = max(0, self.inflight - 1)' in request
+           or 'self.inflight = TranslationCompletionPolicy.remainingInflight(' in request),
       'current remote completion must unregister its attempt and release one slot')
 # Detect the actual regression independently of the Swift runtime test.
 clean = re.sub(r'//[^\n]*', '', transition)

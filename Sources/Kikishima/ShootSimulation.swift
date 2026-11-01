@@ -6,13 +6,9 @@ import AppKit
 @MainActor
 enum ShootSimulation {
     enum Mode: String, CaseIterable { case scrolling, desktop, rapid, silent, paused, error, offline, exhausted
-        case sourceOnlyPro = "source-only-pro-required", sourceOnlySession = "source-only-signed-out"
-        case sourceOnlyPool = "source-only-free-pool", sourceOnlyQuota = "source-only-weekly-quota"
-        case sourceOnlyQuotaText = "source-only-quota-transcription", sourceOnlyPoolText = "source-only-pool-transcription"
         case longSentence = "long-sentence"
         case menuProcess = "menu-process"
-        case sourceOnlyTransition = "source-only-transition"
-        case errorLogin = "error-login", errorQuota = "error-quota"
+        case errorLogin = "error-login"
         case errorDevice = "error-device", errorPermission = "error-permission", audioStopped = "audio-stopped"
     }
     nonisolated static var requestedMode: Mode? {
@@ -33,14 +29,6 @@ enum ShootSimulation {
             exit(1)
         }
         return true
-    }
-    nonisolated static var requestedIslandTransition: Double? {
-        guard let value = ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_ISLAND_TRANSITION"] else { return nil }
-        guard let seconds = Double(value), seconds.isFinite, seconds > 0 else {
-            fputs("Invalid KIKISHIMA_SHOOT_ISLAND_TRANSITION: require positive finite seconds\n", stderr)
-            exit(1)
-        }
-        return seconds
     }
     nonisolated static var requestedPlacement: String? {
         guard let value = ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_PLACEMENT"] else { return nil }
@@ -87,7 +75,6 @@ enum ShootSimulation {
         _ = requestedPlacement // Validate before any app state or startup.
         _ = requestedIslandExpanded
         _ = requestedOpenMenu
-        _ = requestedIslandTransition
         if ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_MODES"] == "1" {
             let data = try! JSONSerialization.data(withJSONObject: Mode.allCases.map(\.rawValue), options: [.sortedKeys])
             print(String(decoding: data, as: UTF8.self))
@@ -118,16 +105,13 @@ enum ShootSimulation {
         sourceIsJapanese = state.localeID.hasPrefix("ja")
         translationIsJapanese = state.targetLang == "Japanese"
         state.captionSurface = mode == .desktop ? "window" : "island"
-        if mode == .error || mode == .errorLogin || mode == .errorQuota { state.captionSurface = "window" }
+        if mode == .error || mode == .errorLogin { state.captionSurface = "window" }
         if let placement = requestedPlacement { state.captionSurface = placement }
         // Screenshot-diff renders each scene in both placements; the placement argument wins.
         if rendering { state.captionSurface = argument("-KikishimaShotPlacement") == "desktop" ? "window" : "island" }
         state.errorBanner = mode == .error ? CaptionBanner(text: tr("没有「系统录音」权限，听不到会议声音。系统设置 › 隐私与安全性 › 屏幕录制与系统录音 里允许 Kikishima。"), action: .openSettings) : nil
         if mode == .errorLogin {
             state.errorBanner = CaptionBanner(text: tr("OpenAI API Key 无效或已撤销，更新 Key 后继续翻译"), action: .settings)
-        } else if mode == .errorQuota {
-            // Existing PlanQuotaPolicy free-plan key; fixed screenshot-only reset.
-            state.errorBanner = CaptionBanner(text: tr("本机翻译暂不可用，请下载语言包或换一个引擎"), action: .settings)
         }
         state.running = true
         state.starting = false
@@ -148,43 +132,6 @@ enum ShootSimulation {
             state.chunks[0].translationComplete = false
             state.chunks[0].translationAttempts = 3
             state.chunks[0].translationExhausted = true
-        }
-        if mode.rawValue.hasPrefix("source-only-") && mode != .sourceOnlyTransition {
-            state.compactCaptions = true
-            state.captionDisplay = "both"
-            let reason: CaptionState.PauseReason = mode == .sourceOnlyPro ? .payment : mode == .sourceOnlySession ? .session :
-                (mode == .sourceOnlyPool || mode == .sourceOnlyPoolText) ? .freePool : .quota
-            state.simulateTranslationPause(reason)
-            var source = sample(1)
-            source.zh = ""
-            source.translationComplete = false
-            // Keep the translated history as data; only the newest source-only segment is current.
-            state.chunks = [sample(0), source]
-            switch mode {
-            case .sourceOnlyPro:
-                state.errorBanner = CaptionBanner(text: tr("翻译已暂停"), action: .settings)
-            case .sourceOnlySession:
-                state.errorBanner = CaptionBanner(text: tr("翻译已暂停"), action: .settings)
-            case .sourceOnlyPool:
-                state.errorBanner = CaptionBanner(text: tr("翻译已暂停"), action: .settings)
-            case .sourceOnlyQuota:
-                state.errorBanner = CaptionBanner(text: tr("本机翻译暂不可用，请下载语言包或换一个引擎"), action: .settings)
-            case .sourceOnlyQuotaText: state.status = tr("额度已用完 · 仅转写")
-            case .sourceOnlyPoolText: state.status = tr("免费额度今日用尽 · 仅转写")
-            default: break
-            }
-        }
-        if mode == .sourceOnlyTransition {
-            state.compactCaptions = true
-            state.captionDisplay = "both"
-            state.chunks = [sample(0)]
-            if !rendering {
-                feed = Task { @MainActor in
-                    do { try await Task.sleep(for: .seconds(requestedIslandTransition ?? 3)) } catch { return }
-                    guard !Task.isCancelled else { return }
-                    applySourceOnlyTransition(state)
-                }
-            }
         }
         if mode == .longSentence {
             var sentence = CaptionChunk(en: "We will review the draft together at the next meeting.",
@@ -235,12 +182,6 @@ enum ShootSimulation {
                 }
             }
         }
-    }
-    static func applySourceOnlyTransition(_ state: CaptionState) {
-        state.simulateTranslationPause(.quota)
-        state.chunks[0].zh = ""
-        state.chunks[0].translationComplete = false
-        state.status = tr("额度已用完 · 仅转写")
     }
     static func showCaptions() {
         CaptionPanelController.shared.show()

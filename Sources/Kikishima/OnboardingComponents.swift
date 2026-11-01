@@ -20,21 +20,6 @@ struct OnboardingWelcome: View {
     }
 }
 
-struct SignInTile: View {
-    let title: String
-    let icon: String
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.system(size: 13, weight: .medium))
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.bordered)
-    }
-}
-
 struct LanguageChoiceTile: View {
     let title: String
     let selected: Bool

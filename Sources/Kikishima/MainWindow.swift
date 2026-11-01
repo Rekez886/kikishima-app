@@ -37,7 +37,7 @@ struct MainWindowView: View {
             VStack(spacing: 0) {
                 SidebarBrandRow()
                 SidebarNavigation(selection: $state.mainSection)
-                quotaCard.padding(10)
+                engineCard.padding(10)
             }
             // Column preferences alone do not constrain native fitting-size measurement.
             // Give wrapped account text a real width so it cannot inflate the split height.
@@ -97,7 +97,7 @@ struct MainWindowView: View {
         .frame(minWidth: KKLayout.mainWindowMinSize.width, minHeight: KKLayout.mainWindowMinSize.height)
     }
 
-    private var quotaCard: some View {
+    private var engineCard: some View {
         SidebarEngineCard(
             engine: state.translationEngine,
             hasOpenAIKey: state.hasOpenAIKey,
@@ -1218,7 +1218,6 @@ Section(tr("常规")) {
                     .foregroundStyle(KKColor.textPrimary)
             }
         }
-        // 服务器地址不给终端用户看；开发调试用 `defaults write com.kikishima.mac proxyURL <url>`
     }
     }
 

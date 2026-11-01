@@ -37,7 +37,6 @@ enum TranslationEnginePolicy {
     static func requiresKey(_ engine: Engine) -> Bool { engine == .openAI }
     static func isLocal(_ engine: Engine) -> Bool { engine == .apple || engine == .mlx }
     static func requiresDownload(_ engine: Engine) -> Bool { engine == .mlx }
-    static func pausesForAccountQuota(_ engine: Engine) -> Bool { false }
 
     /// TranslateGemma expects ISO 639-1 codes or regional variants.
     static func mlxLanguageCode(_ code: String) -> String {
