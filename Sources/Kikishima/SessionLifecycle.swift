@@ -83,31 +83,6 @@ enum SessionControls {
         false
     }
 
-    static let productionAPI = "https://api.kikishima.com"
-
-    #if SANDBOX
-    static let defaultAPI = "https://api.example.invalid"
-    #else
-    static let defaultAPI = productionAPI
-    #endif
-
-    static func resolvedAPIBase(_ raw: String) -> String {
-        #if SANDBOX
-        // Every stored value is pinned to this build's server.
-        return defaultAPI
-        #else
-        let trimmed = raw.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if trimmed == productionAPI { return productionAPI }
-        #if DEBUG
-        if let url = URL(string: trimmed),
-           (url.scheme == "http" || url.scheme == "https"),
-           url.host == "127.0.0.1" || url.host == "localhost" {
-            return trimmed
-        }
-        #endif
-        return productionAPI
-        #endif
-    }
 }
 
 enum CredentialScope: Equatable {

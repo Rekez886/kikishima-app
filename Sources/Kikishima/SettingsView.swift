@@ -45,7 +45,7 @@ struct GlossarySettings: View {
             TextEditor(text: $state.glossary)
                 .font(.system(size: 13, design: .monospaced))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(KKColor.textTertiary.opacity(0.3)))
-            // 服务器上限：80 条 / 4000 字，超出的部分不会发送
+            // OpenAI 请求上限：80 条 / 4000 字，超出的部分不会发送
             let lines = state.glossary.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
             let chars = state.glossary.count
             Text(tr("%@ / 80 条 · %@ / 4000 字", lines, chars))

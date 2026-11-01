@@ -44,7 +44,6 @@ struct TranslationTiming: Codable, Sendable {
     var headersToFirstMs: Int?
     var headersToEndMs: Int?
     var networkRequestToEndMs: Int?
-    var worker: WorkerPreflightTiming?
 
     static func milliseconds(_ delta: TimeInterval) -> Int { Int((max(0, delta) * 1000).rounded()) }
 

@@ -5,7 +5,6 @@ import AVFoundation
 import AudioToolbox
 import Speech
 import Translation
-import AuthenticationServices
 
 struct CaptionChunk: Identifiable {
     let id = UUID()
@@ -153,46 +152,10 @@ final class CaptionState {
             uiLanguage = d.code
             if UserDefaults.standard.string(forKey: "targetLang") == nil { targetLang = d.prompt }
         }
-        // 扩展打招呼（装好 / 浏览器启动 / 打开视频页）：设置页显示「已连接」
-        DistributedNotificationCenter.default().addObserver(forName: NativeHost.helloNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in
-                self?.extensionLastHello = Date()
-                self?.extensionVersion = UserDefaults.standard.string(forKey: "chromeExtVersion") ?? ""   // 宿主进程刚写的
-            }
-        }
         UserDefaults.standard.set(false, forKey: "bubbleMode")
     }
 
-    /// Chrome 扩展正在网页上显示字幕（有字幕轨的视频）
-    var youtubeActive = false
-    var youtubeTitle = ""
-    /// 字幕送到网页里显示（扩展要的实时听译）：此时 app 自己的字幕窗不出现
-    var captionsToExtension = false
-    private var extensionSeq = 0
-    /// 扩展最近一次打招呼（本次启动内实时；启动前的从 UserDefaults 兜底）
-    var extensionLastHello: Date? = {
-        let t = UserDefaults.standard.double(forKey: "chromeHostLastHello")
-        return t > 0 ? Date(timeIntervalSince1970: t) : nil
-    }()
-    /// 24 小时内打过招呼就算装了（扩展只在装好 / 浏览器启动 / 打开视频页时联系 app，不常驻）
-    var chromeExtensionConnected: Bool {
-        guard let t = extensionLastHello else { return false }
-        return Date().timeIntervalSince(t) < 24 * 3600
-    }
-    /// 装着的扩展版本；比这一版 app 期望的旧就提示去更新
-    var extensionVersion: String = UserDefaults.standard.string(forKey: "chromeExtVersion") ?? "" {
-        didSet { UserDefaults.standard.set(extensionVersion, forKey: "chromeExtVersion") }
-    }
-    var extensionOutdated: Bool {
-        guard chromeExtensionConnected, !extensionVersion.isEmpty else { return false }
-        return extensionVersion.compare(NativeHost.expectedExtensionVersion, options: .numeric) == .orderedAscending
-    }
-    var extensionLastHelloText: String {
-        guard let t = extensionLastHello else { return "" }
-        return t.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    /// app 只提供会议场景，网页视频由 Chrome 扩展处理；保留字段以便扩展听译时临时贴发声窗口
+    /// 字幕位置场景：会议贴屏幕顶部，视频贴发声窗口底部
     var captionMode: CaptionMode = .meeting {
         didSet { applyPlacement(force: true) }   // 不再持久化：这是内部状态，不是用户设置
     }
@@ -264,7 +227,7 @@ final class CaptionState {
         didSet { UserDefaults.standard.set(chunkLength, forKey: "chunkLength") }
     }
     private var tuning: ChunkTuning { ChunkTuning.named(chunkLength) }
-    /// 主窗口当前分区（菜单「设置…」/ 未登录提示要切过去）
+    /// 主窗口当前分区（菜单「设置…」要切过去）
     var mainSection: MainSection? = .captions
 
     /// 正在采集麦克风的进程（Zoom/Meet 开会一定开麦；看视频不会）。字幕窗会落在这些进程的窗口所在的屏幕
@@ -310,7 +273,7 @@ final class CaptionState {
     }
 
     private var pollTick = 0
-    /// 运行期唯一的轮询 timer（0.25 秒）：电平 / 静音 / 停摆；每 2 秒场景判定与跟随发声窗口；每 60 秒刷一次额度（会中剩余分钟也在动）
+    /// 运行期唯一的轮询 timer（0.25 秒）：电平 / 静音 / 停摆；每 2 秒场景判定与跟随发声窗口
     private func startMicPolling() {
         micPollTimer?.invalidate()
         pollTick = 0
@@ -434,15 +397,12 @@ final class CaptionState {
         updateTranslationConnectivity()
         if let chunk { translationConnectivity.failed(chunk: chunk, enabled: connectivityAvailable) }
     }
-    /// 翻译暂停（额度用完 / 需订阅 / 会话失效）：继续转写显示原文，不再发请求
+    /// 翻译暂停（缺 OpenAI Key 或本机翻译不可用）：继续转写显示原文，不再发请求
     var translationPaused = false { didSet { updateTranslationConnectivity() } }
-    enum PauseReason { case quota, payment, freePool, session, key, local }
+    enum PauseReason { case key, local }
     private(set) var pauseReason: PauseReason?
     private var pausedAt: Date?
     private func pause(_ r: PauseReason) { translationPaused = true; pauseReason = r; pausedAt = Date() }
-    #if SHOOT || DEBUG
-    func simulateTranslationPause(_ reason: PauseReason) { pause(reason) }
-#endif
     private func unpause() { translationPaused = false; pauseReason = nil; pausedAt = nil }
     /// 会话代数：stop/start 各 +1；异步回调用它判断自己是否已过期
     private var sessionGen = 0
@@ -697,9 +657,6 @@ final class CaptionState {
             translator.engine = translationEngine
         }
     }
-    /// Legacy flag kept for code paths that still mention the hosted service.
-    /// The local-first build never routes translation through Kikishima.
-    var useProxy: Bool { false }
     /// 只保留掩码提示，界面不回显全文，也不把 Key 写进日志。
     private(set) var openAIKeyHint = ""
     var hasOpenAIKey: Bool { !openAIKeyHint.isEmpty }
@@ -1104,74 +1061,6 @@ final class CaptionState {
         }
     }
 
-    // ==== 为浏览器扩展做的实时听译：网页没有字幕轨时，app 听系统声音翻译，结果推回网页原地显示 ====
-    /// 为扩展开实时听译。spoken = 网页指定的原声语言（转写 locale，如 ja_JP），target = 网页选的译文语言；空则沿用 app 的设置
-    /// 用户自己已经在开着字幕时不抢：回一个 busy，网页显示提示
-    /// The audit-run constraint applies to video too; ignore legacy preferences.
-    let localForVideo = false
-    func startLiveForExtension(title: String, spoken: String = "", target: String = "") {
-        if (running || starting) && !captionsToExtension {
-            pushStatus(["kind": "status", "state": "busy"])   // 用户自己开的会话，不接管
-            return
-        }
-        let wantLocale = spoken.isEmpty ? localeID : spoken
-        if (running || starting), wantLocale != localeID { stop() }   // 换了原声语言：重开引擎
-        captionsToExtension = true
-        youtubeActive = true
-        youtubeTitle = title
-        CaptionPanelController.shared.hide()   // 字幕在网页里显示，app 自己的窗不弹
-        if !running && !starting {
-            if wantLocale != localeID { savedLocale = savedLocale ?? localeID; localeID = wantLocale }
-            if !target.isEmpty, target != targetLang { savedTarget = savedTarget ?? targetLang; targetLang = target }
-            if savedCaptionMode == nil { savedCaptionMode = captionMode }
-            captionMode = .video
-            guard start() else {   // 起不来（权限 / 上一次还在收尾）：告诉网页，别让它一直转圈
-                captionsToExtension = false; youtubeActive = false
-                restoreUserPrefs()
-                pushStatus(["kind": "status", "state": "error", "error": "start_failed", "detail": status])
-                return
-            }
-            startMicPolling()
-        } else if !target.isEmpty, target != targetLang {
-            savedTarget = savedTarget ?? targetLang; targetLang = target
-        }
-        if localForVideo {
-            LocalTranslator.shared.prepare(source: LocalTranslator.langCode(localeID), target: LocalTranslator.langCode(targetLang))
-        }
-        pushStatus(["kind": "status", "state": "live"])
-    }
-    func stopLiveForExtension() {
-        guard captionsToExtension else { youtubeActive = false; return }
-        pushStatus(["kind": "status", "state": "stopped"])   // 先说再清，否则被 captionsToExtension 门挡掉
-        captionsToExtension = false
-        youtubeActive = false
-        youtubeTitle = ""
-        if running || starting { stop() }
-        LocalTranslator.shared.teardown()
-        restoreUserPrefs()
-    }
-    /// 扩展会话结束后把被临时改掉的偏好还回去（这些设置是用户的，不该被网页永久改写）
-    private var savedCaptionMode: CaptionMode?
-    private var savedLocale: String?
-    private var savedTarget: String?
-    private func restoreUserPrefs() {
-        if let m = savedCaptionMode { captionMode = m; savedCaptionMode = nil }
-        if let l = savedLocale { localeID = l; savedLocale = nil }
-        if let t = savedTarget { targetLang = t; savedTarget = nil }
-    }
-    /// 把一句字幕推给宿主进程（宿主转给扩展）。seq 让网页端知道是新句还是同一句在更新
-    private func pushToExtension(_ info: [String: Any]) {
-        guard captionsToExtension else { return }
-        pushStatus(info)
-    }
-    /// 状态类消息不受 captionsToExtension 门控：busy / error / stopped 都得能送出去
-    private func pushStatus(_ info: [String: Any]) {
-        DistributedNotificationCenter.default().postNotificationName(NativeHost.captionNotification, object: nil, userInfo: info, deliverImmediately: true)
-    }
-    private func pushChunk(_ chunk: CaptionChunk, index: Int) {
-        pushToExtension(["kind": "chunk", "seq": index, "en": chunk.en, "zh": chunk.zh])
-    }
-
     /// 探测系统音频权限（onboarding 用）：起一次 tap 立刻停；成功即已授权（会触发系统弹窗）
     func probeAudioPermission() async -> Bool {
         let probe = SystemAudioTap(watchesDevice: false)
@@ -1184,7 +1073,7 @@ final class CaptionState {
         }
     }
 
-    /// 返回是否真的开始了（未登录 → 转去登录，不起 tap）
+    /// 返回是否真的开始了
     @discardableResult
     func start() -> Bool {
 #if SHOOT || DEBUG
@@ -1215,7 +1104,7 @@ final class CaptionState {
             Task { try? await MLXModelController.shared.load() }
         }
         meetingSessionContext.begin(
-            selected: captionsToExtension ? nil : calendarCoordinator.selectedContext,
+            selected: calendarCoordinator.selectedContext,
             permanentGlossary: glossary
         )
         // The coordinator orders generations; a new live session must follow retries.
@@ -1230,7 +1119,7 @@ final class CaptionState {
         chunks = []; committedEn = ""; doneChars = 0; volatileEn = ""; pendingEn = ""; sourceLedger = TranslationSourceLedger(); activeTranslationAttempts = [:]
         asrSourceLedger = nil
         translationRetryQueue = TranslationRetryQueue(); inflight = 0; rateLimitedUntil = nil
-        if pauseReason != .session { unpause() }
+        unpause()
         // Keep capture errors visible until the replacement engine and tap work.
         if errorBanner?.action != .retry && errorBanner?.action != .openSettings { errorBanner = nil }
         lastDraftMs = nil; lastFinalMs = nil
@@ -1242,8 +1131,7 @@ final class CaptionState {
         meetingSummarySessionBegan = false
         lastMeetingSummaryEvaluationAt = nil
         meetingSummarySnapshot = nil
-        if MeetingSummaryPreferences.shouldGenerate(consent: summaryConsent, enabled: meetingSummariesEnabled),
-           !captionsToExtension {
+        if MeetingSummaryPreferences.shouldGenerate(consent: summaryConsent, enabled: meetingSummariesEnabled) {
             meetingSummaryGeneration = gen
             meetingSummaryRecordID = UUID().uuidString.lowercased()
             meetingSummaryBuffer = MeetingSummaryLifecycleBuffer(startedAt: startedAt)
@@ -1326,7 +1214,6 @@ final class CaptionState {
     private var startGenOwner = 0
 
     private func failStart(_ error: Error) {
-        let toExtension = captionsToExtension
         stop(reason: nil)
         volatileEn = ""; pendingEn = ""
         let tapErr = error as? AudioTapError
@@ -1337,8 +1224,7 @@ final class CaptionState {
         } else {
             errorBanner = CaptionBanner(text: tr("启动失败：%@", msg), action: .retry)
         }
-        if toExtension { pushStatus(["kind": "status", "state": "error", "error": "start_failed", "detail": msg]) }
-        else { CaptionPanelController.shared.show() }
+        CaptionPanelController.shared.show()
     }
 
     /// 音频电平（0~1）与静音 / 停摆判定：音频线程通过锁写入 meter，主线程 timer 每 0.25 秒读一次写进这三个可观察属性
@@ -1502,7 +1388,7 @@ final class CaptionState {
         timingRecorder.endSession()
         let finalChunks = chunks
         let finalMeetingLocaleIDs = meetingLanguageTimeline.localeIDs
-        let summaryEligible = meetingSummaryGeneration == generation && !captionsToExtension
+        let summaryEligible = meetingSummaryGeneration == generation
         let summaryRecordID = meetingSummaryRecordID
         let summaryStartedAt = sessionStartedAt
         let summaryTargetLanguage = recoverySettings.targetLanguage
@@ -1533,7 +1419,6 @@ final class CaptionState {
         starting = false
         switchingMeetingLanguage = false
         paused = false; pausedSince = nil
-        if captionsToExtension { pushStatus(["kind": "status", "state": "stopped"]); captionsToExtension = false; youtubeActive = false; restoreUserPrefs() }
         inflight = 0
         audioLevel = 0; silentTooLong = false; audioStalled = false
         if let token = activityToken { ProcessInfo.processInfo.endActivity(token); activityToken = nil }
@@ -2161,7 +2046,6 @@ final class CaptionState {
             if !newPending.isEmpty, !pendingEn.hasPrefix(newPending), !newPending.hasPrefix(pendingEn) { pendingDraft = "" }
             if newPending.isEmpty { pendingDraft = "" }
             pendingEn = newPending
-            pushToExtension(["kind": "pending", "en": newPending])
             scheduleDraft()
         }
     }
@@ -2244,9 +2128,8 @@ final class CaptionState {
             metadata.row.pendingAgeMs = observedPendingAt.map { TranslationTiming.milliseconds(now - $0) }
             timingRecorder.event(.created, metadata: metadata.row)
         }
-        pushChunk(chunk, index: chunks.count - 1)
         scheduleTranscriptSave()
-        // 翻译暂停（额度/登录）或限频退避中：只显示原文，不发请求；排进补翻队列，额度回来后补最近几块
+        // 翻译暂停（缺 Key）或限频退避中：只显示原文，不发请求；排进补翻队列，恢复后补最近几块
         if translationPaused { translationRetryQueue.enqueue(chunk.id); return }
         if let until = rateLimitedUntil, until > Date() { translationRetryQueue.enqueue(chunk.id); return }
         if inflight >= 3 { translationRetryQueue.enqueue(chunk.id); return }   // 名额满：排进补发队列，成功一块就补一块
@@ -2299,33 +2182,10 @@ final class CaptionState {
         guard !translationPaused, inflight < 3, rateLimitedUntil.map({ $0 <= Date() }) ?? true else {
             translationRetryQueue.enqueue(id); return
         }
-        // 网页视频听译：先用本机翻译（几十毫秒），拿不到再走 GPT
-        if captionsToExtension, localForVideo, !LocalTranslator.shared.unavailable {
-            inflight += 1
-            let gen = sessionGen
-            Task { @MainActor in
-                let local = await LocalTranslator.shared.translate(text)
-                inflight = TranslationCompletionPolicy.remainingInflight(inflight, requestGeneration: gen, currentGeneration: sessionGen)
-                guard gen == sessionGen else { return }
-                if let local, !local.isEmpty {
-                    if let idx = chunks.firstIndex(where: { $0.id == id }) {
-                        chunks[idx].zh = local
-                        chunks[idx].isDraft = false
-                        chunks[idx].translationComplete = true
-                        translationSucceeded()
-                        pushChunk(chunks[idx], index: idx)
-                        updateRunningStatus()
-                    }
-                } else {
-                    requestTranslationViaProxy(for: id, text: text)   // 本机不行：回落 GPT
-                }
-            }
-            return
-        }
-        requestTranslationViaProxy(for: id, text: text)
+        sendTranslationRequest(for: id, text: text)
     }
 
-    private func requestTranslationViaProxy(for id: UUID, text: String) {
+    private func sendTranslationRequest(for id: UUID, text: String) {
         inflight += 1
         let gen = sessionGen
         let attempt = UUID()
@@ -2353,7 +2213,6 @@ final class CaptionState {
                     row.transactionCount = network.transactionCount; row.requestToHeadersMs = network.requestToHeadersMs
                     row.headersToFirstMs = network.headersToFirstMs; row.headersToEndMs = network.headersToEndMs
                     row.networkRequestToEndMs = network.requestToEndMs
-                    row.worker = network.worker
                     TranslationTimingRecorder.shared.record(row)
                 }
             }
@@ -2376,7 +2235,8 @@ final class CaptionState {
                 await Task { @MainActor in
                 guard let self, gen == self.sessionGen, self.activeTranslationAttempts[id] == attempt else { return }
                 self.activeTranslationAttempts.removeValue(forKey: id)
-                self.inflight = max(0, self.inflight - 1)
+                self.inflight = TranslationCompletionPolicy.remainingInflight(
+                    self.inflight, requestGeneration: gen, currentGeneration: self.sessionGen)
                 guard let idx = self.chunks.firstIndex(where: { $0.id == id }) else { return }
                 if let final {
                     self.chunks[idx].zh = final
@@ -2392,7 +2252,6 @@ final class CaptionState {
                     self.chunks[idx].isDraft = false
                     self.chunks[idx].translationComplete = true
                     self.translationSucceeded()
-                    self.pushChunk(self.chunks[idx], index: idx)
                     self.lastFinalMs = Int(Date().timeIntervalSince(self.chunks[idx].createdAt) * 1000)
                     self.updateRunningStatus()
                     self.queueTranslatedChunksForMeetingSummary()

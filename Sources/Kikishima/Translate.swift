@@ -2,45 +2,6 @@
 import Foundation
 import Security
 
-/// Only the bounded numeric preflight snapshot is retained. Unknown response
-/// fields are never copied into diagnostics. Worker terminal logs use the same ID.
-struct WorkerPreflightTiming: Codable, Sendable {
-    struct Stages: Codable, Sendable {
-        var auth: Int?
-        var plan: Int?
-        var planVersion: Int?
-        var planLoad: Int?
-        var quota: Int?
-        var rate: Int?
-        var claim: Int?
-        var reserve: Int?
-        var upstreamHeaders: Int?
-        var settle: Int?
-        var d1: Int?
-        var values: [Int] { [auth, plan, planVersion, planLoad, quota, rate, claim, reserve, upstreamHeaders, settle, d1].compactMap { $0 } }
-    }
-    var v: Int
-    var id: Int
-    var route: Int
-    var elapsedMs: Int
-    var d1Calls: Int
-    var cache: Int?
-    var attempts: Int
-    var fallback: Int
-    var stages: Stages
-
-    static func parse(_ header: String?) -> Self? {
-        guard let header, header.utf8.count <= 2048,
-              let row = try? JSONDecoder().decode(Self.self, from: Data(header.utf8)),
-              row.v == 1, (0..<281_474_976_710_656).contains(row.id),
-              (0...1).contains(row.route), (0...10_000).contains(row.d1Calls),
-              (0...8).contains(row.attempts), (0...row.attempts).contains(row.fallback),
-              row.cache.map({ (0...2).contains($0) }) ?? true,
-              ([row.elapsedMs] + row.stages.values).allSatisfy({ (0...86_400_000).contains($0) }) else { return nil }
-        return row
-    }
-}
-
 /// Numeric-only optional task diagnostics. Dates in URLSessionTaskMetrics are
 /// deliberately ignored; all durations use monotonic process uptime.
 struct TranslationNetworkTiming: Sendable {
@@ -53,7 +14,6 @@ struct TranslationNetworkTiming: Sendable {
     var headersToFirstMs: Int?
     var headersToEndMs: Int?
     var requestToEndMs: Int?
-    var worker: WorkerPreflightTiming?
 
     static func sample(index: Int, count: Int, retry: Int, started: TimeInterval,
                        headers: TimeInterval?, first: TimeInterval?, ended: TimeInterval,
@@ -82,10 +42,9 @@ private final class TranslationNetworkProbe: NSObject, URLSessionTaskDelegate, @
         row = TranslationNetworkTiming(subrequestIndex: index, subrequestCount: count, retry: retry)
         self.report = report
     }
-    func receivedHeaders(_ response: URLResponse? = nil) {
+    func receivedHeaders() {
         lock.withLock {
             headers = ProcessInfo.processInfo.systemUptime
-            row.worker = WorkerPreflightTiming.parse((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "x-kikishima-timing"))
         }
     }
     func receivedDelta(_ text: String) {
@@ -117,11 +76,9 @@ private final class TranslationNetworkProbe: NSObject, URLSessionTaskDelegate, @
         let sample: TranslationNetworkTiming? = lock.withLock {
             guard !emitted, metricsArrived, let ended else { return nil }
             emitted = true
-            let worker = row.worker
             row = .sample(index: row.subrequestIndex, count: row.subrequestCount, retry: row.retry,
                           started: started, headers: headers, first: first, ended: ended,
                           reused: row.connectionReused, transactions: row.transactionCount)
-            row.worker = worker
             return row
         }
         if let sample { report(sample) }
@@ -669,7 +626,7 @@ func sentenceCutoff(_ text: String, doneChars: Int, tuning: ChunkTuning = .mediu
         var lc = -1
         var k = doneChars
         while k < chars.count - 1 {
-            if ",;:—".contains(chars[k]) && chars[k + 1] == " " { lc = k + 2 - doneChars }
+            if ",;:\u{2014}".contains(chars[k]) && chars[k + 1] == " " { lc = k + 2 - doneChars }
             k += 1
         }
         if lc > tuning.clauseMinLenLatin { return doneChars + lc }

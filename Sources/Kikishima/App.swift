@@ -1,4 +1,4 @@
-// Kikishima — 菜单栏 app + 悬浮字幕窗
+// Kikishima: 菜单栏 app + 悬浮字幕窗
 import SwiftUI
 import AppKit
 import MacControlCenterUI
@@ -63,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static func dismissMenuBarPopup() {
         if let k = NSApp.keyWindow, k.title.isEmpty, !(k.identifier?.rawValue.hasPrefix("main") ?? false) { k.close() }   // 字幕窗标题「字幕」非空，不会误关
     }
-    /// 打开主窗口；section 给了就切到那一栏（登录提示 → 设置，⌘, → 设置）
+    /// 打开主窗口；section 给了就切到那一栏（设置…，⌘, → 设置）
     static func enter(section: MainSection? = nil) {
         if let section { CaptionState.shared.mainSection = section }
         dismissMenuBarPopup()
@@ -157,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-struct KikishimaApp: App {   // 入口在 main.swift（要先判断是不是 Chrome 原生消息宿主模式）
+struct KikishimaApp: App {   // 入口在 main.swift
     @State private var state = CaptionState.shared
     @State private var menuPresented = false
     @Environment(\.openWindow) private var openWindow

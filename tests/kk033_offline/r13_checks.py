@@ -33,7 +33,8 @@ assert 'if ShootSimulation.requestedOpenMenu { ShootOpenMenu.shared.start() }' i
 assert 'if ShootSimulation.requestedOpenMenu && !presented' not in app
 assert 'ShootOpenMenu.shared.discovered(item, present: { menuPresented = true })' in app
 shoot=read('ShootSimulation.swift')
-assert 'seconds.isFinite, seconds > 0' in shoot
+assert 'requestedIslandTransition' not in shoot
+assert 'source-only-transition' not in shoot and 'error-quota' not in shoot
 assert shoot.startswith('#if SHOOT || DEBUG') and shoot.rstrip().endswith('#endif')
 render=read('ShootRender.swift');assert 'MenuContent(state: state' in render and 'MainWindowView()' in render
 assert 'menuKeyboardPresented' in app and 'KIKISHIMA_SHOOT_RENDER' in block(app,'private var menuKeyboardPresented:')
