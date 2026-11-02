@@ -10,10 +10,6 @@ See Privacy for when text is sent to OpenAI.
 
 This repository is the open-source, payment-free edition. There is no account,
 no subscription or quota, and the app does not contact any Kikishima server.
-Some unused leftover code from the paid edition remains in the source tree,
-including the old API address constant in `Sources/Kikishima/SessionLifecycle.swift`
-and the network path in `Sources/Kikishima/NativeHost.swift`, which app startup
-does not call.
 
 ## Features
 
