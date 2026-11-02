@@ -101,9 +101,15 @@ if [ -n "$DEV_ID" ]; then
   # Maintainers can pass SIGN_ID to use their own Developer ID certificate.
   # mlx.metallib is a non-Mach-O file in Contents/MacOS; codesign requires nested items to be signed first.
   if [ -f "$APP/Contents/MacOS/mlx.metallib" ]; then
-    codesign --force --timestamp --sign "$DEV_ID" "$APP/Contents/MacOS/mlx.metallib"
+    if ! codesign --force --timestamp --sign "$DEV_ID" "$APP/Contents/MacOS/mlx.metallib"; then
+      echo "ERROR: failed to sign mlx.metallib with Developer ID" >&2
+      exit 1
+    fi
   fi
-  codesign --force --options runtime --timestamp --entitlements Resources/Kikishima.entitlements --sign "$DEV_ID" "$APP"
+  if ! codesign --force --options runtime --timestamp --entitlements Resources/Kikishima.entitlements --sign "$DEV_ID" "$APP"; then
+    echo "ERROR: failed to sign Kikishima.app with Developer ID" >&2
+    exit 1
+  fi
   echo "SIGNED: Developer ID"
 else
   # No SIGN_ID: ad-hoc sign so the app can run for development.
