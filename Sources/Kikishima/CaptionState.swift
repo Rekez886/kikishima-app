@@ -542,7 +542,12 @@ final class CaptionState {
     }
     /// 常用会议语言（onboarding 第二问，多选，locale id）；第一个作默认会议语言，全部预下载模型
     var meetingLocales: [String] = UserDefaults.standard.stringArray(forKey: "meetingLocales") ?? [] {
-        didSet { UserDefaults.standard.set(meetingLocales, forKey: "meetingLocales") }
+        didSet {
+#if SHOOT || DEBUG
+            if ShootSimulation.requestedMode != nil { return }
+#endif
+            UserDefaults.standard.set(meetingLocales, forKey: "meetingLocales")
+        }
     }
     /// 各 locale 转写模型下载进度；安装状态单独从 Speech 查询。
     var modelProgress: [String: Double] = [:]

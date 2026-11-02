@@ -2,6 +2,20 @@
 import SwiftUI
 import AppKit
 
+/// Pure decisions for a non-rendering shoot session; no app state or speech framework.
+enum ShootSessionPolicy {
+    /// Current meeting language first, then every language that was already enabled.
+    static func meetingLocales(current: String, existing: [String]) -> [String] {
+        var result = [current]
+        var seen: Set<String> = [current]
+        for id in existing where seen.insert(id).inserted { result.append(id) }
+        return result
+    }
+
+    /// Offscreen renders must not depend on the machine's installed model state.
+    static func refreshesModelInstallation(offscreenRender: Bool) -> Bool { !offscreenRender }
+}
+
 /// Synthetic input for the real app, state, menu and caption surfaces.
 @MainActor
 enum ShootSimulation {
@@ -14,6 +28,10 @@ enum ShootSimulation {
     nonisolated static var requestedMode: Mode? {
         ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_SIM"].flatMap(Mode.init(rawValue:))
     }
+    nonisolated static var isOffscreenRender: Bool {
+        ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_RENDER"] != nil
+    }
+
     nonisolated static var requestedIslandExpanded: Bool {
         guard let value = ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_ISLAND_EXPANDED"] else { return false }
         guard value == "1" else {
@@ -90,7 +108,7 @@ enum ShootSimulation {
         feed?.cancel()
         self.mode = mode
         interfaceLanguage = selectedInterfaceLanguage(arguments: ProcessInfo.processInfo.arguments, saved: state.uiLanguage)
-        let rendering = ProcessInfo.processInfo.environment["KIKISHIMA_SHOOT_RENDER"] != nil
+        let rendering = isOffscreenRender
         // Render state was initialized from the volatile domain. Assigning these
         // properties would trigger production didSet persistence, including the
         // shared uiLanguage/AppleLanguages race. Normal SHOOT behavior is unchanged.
@@ -100,7 +118,7 @@ enum ShootSimulation {
             state.autoDownloadModels = false
             state.localeID = argument("-KikishimaMeetingLanguage") ?? (interfaceLanguage == "ja" ? "en_US" : "ja_JP")
             state.targetLang = argument("-KikishimaCaptionLanguage") ?? (interfaceLanguage == "ja" ? "Japanese" : "English")
-            state.meetingLocales = [state.localeID]
+            state.meetingLocales = ShootSessionPolicy.meetingLocales(current: state.localeID, existing: state.meetingLocales)
         }
         sourceIsJapanese = state.localeID.hasPrefix("ja")
         translationIsJapanese = state.targetLang == "Japanese"
