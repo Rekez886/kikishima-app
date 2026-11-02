@@ -80,7 +80,8 @@ first, then `./build.sh`.
   first open.
 - **With `SIGN_ID`** it signs with that Developer ID Application identity using
   hardened runtime and a secure timestamp. If the identity is not found in your
-  keychain, the build stops with an error instead of falling back to ad-hoc.
+  keychain, or if signing fails, the build stops with an error instead of
+  falling back to ad-hoc.
 
 ```bash
 SIGN_ID="Developer ID Application: Your Name (TEAMID)" ./build.sh
@@ -97,6 +98,36 @@ System Settings > Privacy & Security > Security > Open Anyway (available for
 about an hour after the attempt), then enter your login password.
 Apple's page does not name a macOS version, and this project has not checked
 the exact dialogs on macOS 27 or 26. Only open software you trust.
+
+### Packaging an official release
+
+Maintainers package and notarize official DMG releases using
+`scripts/make-dmg.sh`:
+
+```bash
+SIGN_ID="Developer ID Application: Your Name (TEAMID)" ./scripts/make-dmg.sh [--dry-run] <version>
+```
+
+A real run requires `SIGN_ID` in the environment, a clean git checkout under
+`/tmp`, and `Resources/Info.plist` matching `<version>`. The script:
+- Invokes `build.sh` with `SIGN_ID` to compile and Developer ID sign the app
+  with hardened runtime.
+- Verifies the app signature with `codesign --verify`.
+- Creates a DMG containing `Kikishima.app` and an `/Applications` symlink,
+  then signs the DMG.
+- Submits the DMG to Apple with `xcrun notarytool` and staples the ticket with
+  `xcrun stapler staple`. Notarization is applied only to the DMG
+  (`notarization=dmg-only` in `dist/build-info.txt`); `build.sh` does not
+  notarize.
+
+Maintainers verify the resulting DMG with `scripts/verify-release.sh`:
+
+```bash
+./scripts/verify-release.sh dist/Kikishima-<version>.dmg <version>
+```
+
+It performs read-only checks on the DMG and writes evidence to
+`dist/verify-<version>-<UTC>/`.
 
 ## Translation engines
 
