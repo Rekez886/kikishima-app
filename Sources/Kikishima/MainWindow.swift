@@ -212,7 +212,14 @@ struct CaptionsHome: View {
                 }
                 .task {
 #if SHOOT || DEBUG
-                    if ShootSimulation.requestedMode != nil { allLocales = state.meetingLocales; return }
+                    if ShootSimulation.requestedMode != nil {
+                        // Offscreen renders must not depend on this machine's installed models.
+                        if ShootSessionPolicy.refreshesModelInstallation(offscreenRender: ShootSimulation.isOffscreenRender) {
+                            await state.refreshModelInstallation()
+                        }
+                        allLocales = state.meetingLocales
+                        return
+                    }
 #endif
                     await state.refreshModelInstallation()
                     allLocales = await SpeechTranscriber.supportedLocales.map(\.identifier).sorted()
